@@ -59,7 +59,7 @@ Ensure you have Python 3.8+ installed.
 ### 2. Setup Project
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/NotMubasshir/internet-black-box
 cd internet-black-box
 
 # Install minimal dependencies
