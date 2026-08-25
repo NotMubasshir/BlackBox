@@ -1,66 +1,69 @@
-# Internet Black Box ⬛📶
+# Internet Black Box
 
-> *"Every connection leaves a trace."*
+A local network monitor for keeping an eye on your internet connection.
 
-**Internet Black Box** is a lightweight, local network-monitoring dashboard built with Python, Flask, SQLite, and vanilla JS. It runs locally on your machine, continuously tracking internet connectivity, latency, packet loss, and DNS resolution time while automatically logging internet outages into a local SQLite database.
+Internet Black Box runs quietly in the background and records metrics like latency, packet loss, DNS response time, and connection outages. Everything is stored locally in SQLite, meaning there are no cloud services or external dashboards involved.
 
----
-
-## Features
-
-- **Continuous Background Monitoring**: Checks connectivity, latency, packet loss, and DNS resolution.
-- **Outage Detection**: Records exact start time, recovery time, and total downtime for every connection failure.
-- **Network Health Score (0–100)**: Real-time calculated status score based on latency, packet loss, DNS resolution, and uptime.
-- **Offline Resilient UI**: The Flask dashboard runs entirely locally and remains accessible even when your internet connection is completely offline.
-- **Low Resource Usage**: Minimal CPU, RAM, and bandwidth consumption. Uses lightweight socket and system probes.
-- **Historical Telemetry & Statistics**: View metrics aggregated for Today, 7 Days, or 30 Days.
-- **Configurable**: Easily modify monitoring intervals, ping targets, DNS lookup targets, and data retention windows.
+> **Every connection leaves a trace.**
 
 ---
 
-## Technical Architecture
+## What It Does
 
-+-------------------------------------------------------------+
-|                     Internet Black Box                      |
-+-------------------------------------------------------------+
-|
-+-----------------------+-----------------------+
-|                                               |
-v                                               v
-+---------------+                             +------------------+
-| Network       |                             | Flask Web Server |
-| Monitor Thread|                             | (app.py)         |
-+---------------+                             +------------------+
-|                                               |
-|  1. Ping / Socket Probes                      |  3. REST API
-|  2. Outage & Metric Logging                   |     Endpoints
-v                                               v
-+---------------+                             +------------------+
-| Local SQLite  | <-------------------------- | Vanilla JS UI    |
-| (blackbox.db) |    4. Reads Metrics &       | (Chart.js)       |
-+---------------+       Historical Data       +------------------+
-
+* **Continuous Monitoring:** Keeps track of your internet connection status around the clock.
+* **Latency Tracking:** Measures ping and response times.
+* **Packet Loss Analysis:** Tracks packet drops during check cycles.
+* **DNS Performance:** Measures DNS response time.
+* **Outage Detection:** Detects and records connection drops and recovery times.
+* **Visual Dashboards:** Displays live latency and DNS graphs alongside 1-day, 7-day, and 30-day historical statistics.
+* **Health Scoring:** Calculates an overall network health score.
+* **Local Storage:** Stores all data securely in a local SQLite database.
 
 ---
 
-## Tech Stack
+## How It Works
 
-- **Backend**: Python 3, Flask, SQLite3, Standard Socket & Subprocess Libraries
-- **Frontend**: HTML5, Cyberpunk NOC CSS, Vanilla JavaScript, Chart.js (CDN)
-- **Database**: SQLite3 (`data/blackbox.db`)
+The application is split into two primary components:
 
----
+1. **Background Monitor (`monitor.py`):** Runs a background thread that periodically checks the configured ping target, performs a DNS lookup, assesses connectivity, calculates packet loss, and writes the results to SQLite. It also manages outage start and end records.
+2. **Local Dashboard (`app.py`):** Runs a lightweight Flask server that exposes the recorded data via a REST API, powering a responsive frontend dashboard that updates dynamically.
 
-## Quick Start / Installation
+### Data Flow
 
-### 1. Prerequisites
-Ensure you have Python 3.8+ installed.
-
-### 2. Setup Project
-```bash
-# Clone the repository
-git clone https://github.com/NotMubasshir/internet-black-box
+```text
+Internet
+   │
+   ▼
+Network Monitor (Ping / DNS / Connectivity)
+   │
+   ▼
+SQLite Database
+   │
+   ▼
+Flask API
+   │
+   ▼
+Browser Dashboard
+Project StructurePlaintextinternet-black-box/
+│
+├── app.py
+├── monitor.py
+├── database.py
+├── requirements.txt
+├── README.md
+├── .gitignore
+│
+├── data/
+│   └── blackbox.db
+│
+├── templates/
+│   └── index.html
+│
+└── static/
+    ├── style.css
+    └── script.js
+(Note: The database directory and file are created automatically if they do not already exist.)Tech StackBackendPythonFlaskSQLite3socket, subprocess, threadingFrontendHTML5CSS3Vanilla JavaScriptChart.js (No heavy frontend frameworks required)InstallationRequirementsPython 3.8+Windows, Linux, or macOSAn internet connection for initial package setupStepsClone the repository:Bashgit clone [https://github.com/NotMubasshir/internet-black-box.git](https://github.com/NotMubasshir/internet-black-box.git)
 cd internet-black-box
-
-# Install minimal dependencies
-pip install -r requirements.txt
+Install dependencies:Bashpip install -r requirements.txt
+Start the application:Bashpython app.py
+Access the dashboard:Open your browser and navigate to:http://127.0.0.1:5000ConfigurationSettings can be managed directly from the web dashboard interface.SettingDescriptionDefault ValueMonitoring IntervalHow often the monitor performs a check5 secondsPing TargetHost or IP address used for latency testing8.8.8.8DNS TargetDomain used for DNS lookup testingone.one.one.oneData RetentionHow long historical records are kept7 daysGraph PointsNumber of recent measurements displayed on live graphs30Database SchemaInternet Black Box utilizes a local SQLite database located at data/blackbox.db. It stores two main types of logs:Measurements: Timestamps, connection status, latency values, packet loss percentages, and DNS response times for each monitoring cycle.Outages: Start times, end times, total duration, and status for every detected network drop.Speed TestThe dashboard includes an optional manual download speed test feature. Unlike background monitoring checks, the speed test actively transfers data and is intended for manual, occasional troubleshooting rather than continuous automated tracking.Why I Built ThisMost internet connectivity issues are intermittent. A connection might look fine during a quick manual check, but that does not explain performance drops from an hour ago.Internet Black Box answers questions such as:Did my internet connection actually go down?How long did the outage last?Was my latency unusually high at a specific time?Has packet loss been happening repeatedly?How reliable has my connection been over the last week?PrivacyThis project is built with a local-first philosophy.No user accountsNo cloud databasesNo telemetry or tracking servicesNo external dashboardsAll network metrics remain securely on your machine.LicenseThis project is open-source. Refer to the repository's license file for details.AuthorMubasshir HossainGitHub: NotMubasshirIf you find a bug or have suggestions for improvement, feel free to open an issue or submit a pull request.
