@@ -141,3 +141,74 @@ internet-black-box/
 │
 └── data/
     └── blackbox.db
+```
+The SQLite database is created automatically when the application starts.
+
+## Tech Stack
+### Backend
+Python
+Flask
+SQLite3
+socket, subprocess, threading
+### Frontend
+HTML5
+CSS3
+Vanilla JavaScript
+Chart.js (No heavy frontend frameworks required)
+## Installation
+Requirements
+Python 3.8+
+Windows, Linux, or macOS
+An internet connection for initial package setup
+## Steps
+Clone the repository:
+```
+Bash
+
+git clone https://github.com/NotMubasshir/internet-black-box.gitcd internet-black-box
+```
+## Install dependencies:
+```
+Bash
+
+pip install -r requirements.txt
+```
+## Start the application:
+```
+Bash
+
+python app.py
+```
+## Access the dashboard:
+Open your browser and navigate to:
+http://127.0.0.1:5000
+## Configuration
+Settings can be managed directly from the web dashboard interface.
+SettingDescriptionDefault ValueMonitoring IntervalHow often the monitor performs a check5 secondsPing TargetHost or IP address used for latency testing8.8.8.8DNS TargetDomain used for DNS lookup testingone.one.one.oneData RetentionHow long historical records are kept7 daysGraph PointsNumber of recent measurements displayed on live graphs30
+## Database Schema
+Internet Black Box utilizes a local SQLite database located at data/blackbox.db. It stores two main types of logs:
+Measurements: Timestamps, connection status, latency values, packet loss percentages, and DNS response times for each monitoring cycle.
+Outages: Start times, end times, total duration, and status for every detected network drop.
+## Speed Test
+The dashboard includes an optional manual download speed test feature. Unlike background monitoring checks, the speed test actively transfers data and is intended for manual, occasional troubleshooting rather than continuous automated tracking.
+## Why I Built This
+Most internet connectivity issues are intermittent. A connection might look fine during a quick manual check, but that does not explain performance drops from an hour ago.
+Internet Black Box answers questions such as:
+### Did my internet connection actually go down?
+### How long did the outage last?
+### Was my latency unusually high at a specific time?
+### Has packet loss been happening repeatedly?
+### How reliable has my connection been over the last week?
+## Privacy
+This project is built with a local-first philosophy.
+No user accounts
+No cloud databases
+No telemetry or tracking services
+No external dashboards
+All network metrics remain securely on your machine.
+# License
+This project is open-source. Refer to the repository's license file for details.
+Author
+## Mubasshir Hossain
+GitHub: NotMubasshir
+If you find a bug or have suggestions for improvement, feel free to open an issue or submit a pull request.
