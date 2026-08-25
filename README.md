@@ -30,7 +30,6 @@ The application is split into two primary components:
 
 ### Data Flow
 
-```text
 Internet
    │
    ▼
