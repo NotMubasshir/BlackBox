@@ -1,317 +1,802 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener("DOMContentLoaded", () => {
     let latencyChart = null;
     let selectedStatsDays = 1;
+    let dashboardTimer = null;
+    let isDashboardUpdating = false;
 
-    // View Navigation
-    const navItems = document.querySelectorAll('.nav-item');
-    const viewSections = document.querySelectorAll('.view-section');
+    // ------------------------------------------------------------
+    // DOM helpers
+    // ------------------------------------------------------------
 
-    navItems.forEach(item => {
-        item.addEventListener('click', () => {
-            const target = item.getAttribute('data-target');
-            navItems.forEach(n => n.classList.remove('active'));
-            viewSections.forEach(v => v.classList.remove('active'));
+    const $ = (id) => document.getElementById(id);
 
-            item.classList.add('active');
-            document.getElementById(target).classList.add('active');
+    function setText(id, value) {
+        const element = $(id);
+        if (element) {
+            element.textContent = value;
+        }
+    }
 
-            if (target === 'view-statistics') {
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    // ------------------------------------------------------------
+    // Navigation
+    // ------------------------------------------------------------
+
+    const navItems = document.querySelectorAll(".nav-item");
+    const viewSections = document.querySelectorAll(".view-section");
+
+    navItems.forEach((item) => {
+        item.addEventListener("click", () => {
+            const target = item.dataset.target;
+            const targetSection = $(target);
+
+            if (!targetSection) return;
+
+            navItems.forEach((nav) => nav.classList.remove("active"));
+            viewSections.forEach((view) => view.classList.remove("active"));
+
+            item.classList.add("active");
+            targetSection.classList.add("active");
+
+            if (target === "view-statistics") {
                 fetchStatistics(selectedStatsDays);
-            } else if (target === 'view-outages') {
+            }
+
+            if (target === "view-outages") {
                 fetchOutages();
-            } else if (target === 'view-settings') {
+            }
+
+            if (target === "view-settings") {
                 loadSettings();
             }
         });
     });
 
-    // Chart Initialization
+    // ------------------------------------------------------------
+    // Formatting
+    // ------------------------------------------------------------
+
+    function formatTime(isoString) {
+        if (!isoString) return "--:--:--";
+
+        const date = new Date(isoString);
+
+        if (Number.isNaN(date.getTime())) {
+            return "--:--:--";
+        }
+
+        return date.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+    }
+
+    function formatDateTime(isoString) {
+        if (!isoString) return "Unknown";
+
+        const date = new Date(isoString);
+
+        if (Number.isNaN(date.getTime())) {
+            return "Unknown";
+        }
+
+        return date.toLocaleString([], {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        });
+    }
+
+    function formatDuration(seconds) {
+        if (seconds === null || seconds === undefined) {
+            return "Ongoing";
+        }
+
+        seconds = Math.max(0, Math.floor(Number(seconds)));
+
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+
+        if (days > 0) {
+            return `${days}d ${hours}h ${minutes}m`;
+        }
+
+        if (hours > 0) {
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
+
+        if (minutes > 0) {
+            return `${minutes}m ${secs}s`;
+        }
+
+        return `${secs}s`;
+    }
+
+    function formatSessionUptime(totalSeconds) {
+        totalSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        if (days > 0) {
+            return `${days}d ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+        }
+
+        return [
+            String(hours).padStart(2, "0"),
+            String(minutes).padStart(2, "0"),
+            String(seconds).padStart(2, "0")
+        ].join(":");
+    }
+
+    function formatNumber(value, decimals = 2) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+            return "--";
+        }
+
+        return Number(value).toFixed(decimals);
+    }
+
+    // ------------------------------------------------------------
+    // API helper
+    // ------------------------------------------------------------
+
+    async function apiFetch(url, options = {}) {
+        const response = await fetch(url, {
+            cache: "no-store",
+            ...options
+        });
+
+        let data;
+
+        try {
+            data = await response.json();
+        } catch {
+            throw new Error(`Server returned HTTP ${response.status}`);
+        }
+
+        if (!response.ok) {
+            throw new Error(data.message || `Request failed (${response.status})`);
+        }
+
+        return data;
+    }
+
+    // ------------------------------------------------------------
+    // Chart
+    // ------------------------------------------------------------
+
     function initChart() {
-        const ctx = document.getElementById('liveLatencyChart').getContext('2d');
+        const canvas = $("liveLatencyChart");
+
+        if (!canvas || typeof Chart === "undefined") {
+            console.error("Chart.js is unavailable.");
+            return;
+        }
+
+        const ctx = canvas.getContext("2d");
+
         latencyChart = new Chart(ctx, {
-            type: 'line',
+            type: "line",
+
             data: {
                 labels: [],
+
                 datasets: [
                     {
-                        label: 'Ping (ms)',
-                        borderColor: '#00f0ff',
-                        backgroundColor: 'rgba(0, 240, 255, 0.1)',
+                        label: "Ping",
                         data: [],
+                        borderColor: "#22d3ee",
+                        backgroundColor: "rgba(34, 211, 238, 0.08)",
                         borderWidth: 2,
-                        tension: 0.3,
-                        fill: true
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        tension: 0.35,
+                        fill: true,
+                        spanGaps: true
                     },
                     {
-                        label: 'DNS Latency (ms)',
-                        borderColor: '#3b82f6',
-                        backgroundColor: 'transparent',
+                        label: "DNS",
                         data: [],
+                        borderColor: "#60a5fa",
+                        backgroundColor: "transparent",
                         borderWidth: 1.5,
-                        borderDash: [4, 4],
-                        tension: 0.3
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        borderDash: [5, 5],
+                        tension: 0.35,
+                        fill: false,
+                        spanGaps: true
                     }
                 ]
             },
+
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+
+                interaction: {
+                    intersect: false,
+                    mode: "index"
+                },
+
+                animation: false,
+
                 scales: {
                     x: {
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        ticks: { color: '#9ca3af', font: { family: 'monospace', size: 10 } }
+                        grid: {
+                            color: "rgba(148, 163, 184, 0.07)"
+                        },
+                        border: {
+                            display: false
+                        },
+                        ticks: {
+                            color: "#64748b",
+                            maxTicksLimit: 8,
+                            font: {
+                                family: "Inter, system-ui, sans-serif",
+                                size: 10
+                            }
+                        }
                     },
+
                     y: {
                         beginAtZero: true,
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        ticks: { color: '#9ca3af', font: { family: 'monospace', size: 10 } }
+
+                        grid: {
+                            color: "rgba(148, 163, 184, 0.07)"
+                        },
+
+                        border: {
+                            display: false
+                        },
+
+                        ticks: {
+                            color: "#64748b",
+                            font: {
+                                family: "Inter, system-ui, sans-serif",
+                                size: 10
+                            },
+
+                            callback: (value) => `${value} ms`
+                        }
                     }
                 },
+
                 plugins: {
-                    legend: { labels: { color: '#f3f4f6', font: { size: 12 } } }
+                    legend: {
+                        position: "top",
+                        align: "start",
+
+                        labels: {
+                            color: "#94a3b8",
+                            usePointStyle: true,
+                            pointStyle: "line",
+                            boxWidth: 28,
+                            padding: 18
+                        }
+                    },
+
+                    tooltip: {
+                        backgroundColor: "#111827",
+                        borderColor: "rgba(148, 163, 184, 0.15)",
+                        borderWidth: 1,
+                        titleColor: "#f8fafc",
+                        bodyColor: "#cbd5e1",
+                        padding: 12,
+
+                        callbacks: {
+                            label: (context) => {
+                                const value = context.raw;
+
+                                if (value === null || value === undefined) {
+                                    return `${context.dataset.label}: unavailable`;
+                                }
+
+                                return `${context.dataset.label}: ${value} ms`;
+                            }
+                        }
+                    }
                 }
             }
         });
     }
 
-    // Helper Functions
-    function formatTime(isoString) {
-        if (!isoString) return '--:--:--';
-        const d = new Date(isoString);
-        return d.toLocaleTimeString();
+    function updateChart(metrics) {
+        if (!latencyChart) return;
+
+        latencyChart.data.labels = metrics.map((metric) =>
+            formatTime(metric.timestamp)
+        );
+
+        latencyChart.data.datasets[0].data = metrics.map((metric) =>
+            metric.latency === null ? null : metric.latency
+        );
+
+        latencyChart.data.datasets[1].data = metrics.map((metric) =>
+            metric.dns_time === null ? null : metric.dns_time
+        );
+
+        latencyChart.update("none");
     }
 
-    function formatDuration(seconds) {
-        if (!seconds && seconds !== 0) return 'Ongoing';
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        if (mins === 0) return `${secs}s`;
-        return `${mins}m ${secs}s`;
-    }
+    // ------------------------------------------------------------
+    // Dashboard
+    // ------------------------------------------------------------
 
-    function formatSessionUptime(totalSeconds) {
-        const hrs = Math.floor(totalSeconds / 3600);
-        const mins = Math.floor((totalSeconds % 3600) / 60);
-        const secs = totalSeconds % 60;
-        return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-    }
-
-    // Fetch Status & Live Metrics
     async function updateDashboard() {
+        if (isDashboardUpdating) return;
+
+        isDashboardUpdating = true;
+
         try {
-            const statusRes = await fetch('/api/status');
-            const statusData = await statusRes.json();
+            const [statusData, metricsData] = await Promise.all([
+                apiFetch("/api/status"),
+                apiFetch("/api/metrics")
+            ]);
 
-            // Update top bar status
-            const beacon = document.getElementById('status-beacon');
-            const title = document.getElementById('status-title');
-            const subtitle = document.getElementById('status-subtitle');
+            const beacon = $("status-beacon");
+            const statusTitle = $("status-title");
+            const statusSubtitle = $("status-subtitle");
 
-            if (statusData.status === 'ONLINE') {
-                beacon.className = 'beacon online';
-                title.textContent = '● ONLINE';
-                subtitle.textContent = 'Your internet connection is operating normally';
+            const isOnline = statusData.status === "ONLINE";
+
+            if (beacon) {
+                beacon.className = `beacon ${isOnline ? "online" : "offline"}`;
+            }
+
+            setText(
+                "status-title",
+                isOnline ? "Online" : "Connection unavailable"
+            );
+
+            setText(
+                "status-subtitle",
+                isOnline
+                    ? "Your internet connection is operating normally."
+                    : "Network probes are currently failing."
+            );
+
+            setText("health-score-val", statusData.health_score);
+            setText(
+                "session-uptime-text",
+                formatSessionUptime(statusData.session_duration_seconds)
+            );
+
+            setText(
+                "card-reliability-val",
+                `${formatNumber(statusData.reliability_today)}%`
+            );
+
+            // Ping
+            const pingElement = $("card-ping-val");
+            const pingBadge = $("card-ping-badge");
+
+            if (statusData.latency !== null) {
+                setText(
+                    "card-ping-val",
+                    `${formatNumber(statusData.latency)} ms`
+                );
+
+                if (statusData.latency < 40) {
+                    pingBadge.textContent = "Excellent";
+                    pingBadge.className = "badge excellent";
+                } else if (statusData.latency < 90) {
+                    pingBadge.textContent = "Good";
+                    pingBadge.className = "badge good";
+                } else if (statusData.latency < 180) {
+                    pingBadge.textContent = "Elevated";
+                    pingBadge.className = "badge warning";
+                } else {
+                    pingBadge.textContent = "High";
+                    pingBadge.className = "badge critical";
+                }
             } else {
-                beacon.className = 'beacon offline';
-                title.textContent = '● OFFLINE';
-                subtitle.textContent = 'Internet connection unavailable / Probes failing';
+                pingElement.textContent = "Unavailable";
+                pingBadge.textContent = "Offline";
+                pingBadge.className = "badge critical";
             }
 
-            document.getElementById('health-score-val').textContent = statusData.health_score;
-            document.getElementById('session-uptime-text').textContent = formatSessionUptime(statusData.session_duration_seconds);
-            document.getElementById('card-reliability-val').textContent = `${statusData.reliability_today}%`;
+            // Packet loss
+            const packetLoss = statusData.packet_loss;
 
-            // Stat Cards
-            const pingVal = statusData.latency !== null ? `${statusData.latency} ms` : 'Offline';
-            document.getElementById('card-ping-val').textContent = pingVal;
-            const pingBadge = document.getElementById('card-ping-badge');
-            if (statusData.latency === null) {
-                pingBadge.textContent = 'Critical';
-                pingBadge.className = 'badge critical';
-            } else if (statusData.latency < 40) {
-                pingBadge.textContent = 'Excellent';
-                pingBadge.className = 'badge excellent';
-            } else if (statusData.latency < 90) {
-                pingBadge.textContent = 'Good';
-                pingBadge.className = 'badge good';
+            if (packetLoss !== null) {
+                setText(
+                    "card-loss-val",
+                    `${formatNumber(packetLoss)}%`
+                );
+
+                if (packetLoss === 0) {
+                    $("card-loss-badge").textContent = "None";
+                    $("card-loss-badge").className = "badge excellent";
+                } else if (packetLoss <= 1) {
+                    $("card-loss-badge").textContent = "Low";
+                    $("card-loss-badge").className = "badge good";
+                } else if (packetLoss <= 5) {
+                    $("card-loss-badge").textContent = "Warning";
+                    $("card-loss-badge").className = "badge warning";
+                } else {
+                    $("card-loss-badge").textContent = "High";
+                    $("card-loss-badge").className = "badge critical";
+                }
             } else {
-                pingBadge.textContent = 'High';
-                pingBadge.className = 'badge warning';
+                setText("card-loss-val", "--");
+                $("card-loss-badge").textContent = "--";
+                $("card-loss-badge").className = "badge";
             }
 
-            const lossVal = statusData.packet_loss !== null ? `${statusData.packet_loss}%` : '100%';
-            document.getElementById('card-loss-val').textContent = lossVal;
-            const lossBadge = document.getElementById('card-loss-badge');
-            if (statusData.packet_loss === 0) {
-                lossBadge.textContent = 'Excellent';
-                lossBadge.className = 'badge excellent';
-            } else if (statusData.packet_loss <= 5) {
-                lossBadge.textContent = 'Warning';
-                lossBadge.className = 'badge warning';
+            // DNS
+            const dnsTime = statusData.dns_time;
+
+            if (dnsTime !== null) {
+                setText(
+                    "card-dns-val",
+                    `${formatNumber(dnsTime)} ms`
+                );
+
+                if (dnsTime < 50) {
+                    $("card-dns-badge").textContent = "Fast";
+                    $("card-dns-badge").className = "badge excellent";
+                } else if (dnsTime < 100) {
+                    $("card-dns-badge").textContent = "Good";
+                    $("card-dns-badge").className = "badge good";
+                } else if (dnsTime < 200) {
+                    $("card-dns-badge").textContent = "Slow";
+                    $("card-dns-badge").className = "badge warning";
+                } else {
+                    $("card-dns-badge").textContent = "Very slow";
+                    $("card-dns-badge").className = "badge critical";
+                }
             } else {
-                lossBadge.textContent = 'Poor';
-                lossBadge.className = 'badge critical';
+                setText("card-dns-val", "Failed");
+                $("card-dns-badge").textContent = "Failed";
+                $("card-dns-badge").className = "badge critical";
             }
 
-            const dnsVal = statusData.dns_time !== null ? `${statusData.dns_time} ms` : 'Failed';
-            document.getElementById('card-dns-val').textContent = dnsVal;
-            const dnsBadge = document.getElementById('card-dns-badge');
-            if (statusData.dns_time !== null && statusData.dns_time < 50) {
-                dnsBadge.textContent = 'Fast';
-                dnsBadge.className = 'badge excellent';
-            } else {
-                dnsBadge.textContent = 'Normal';
-                dnsBadge.className = 'badge good';
+            updateChart(metricsData);
+        } catch (error) {
+            console.error("Dashboard update failed:", error);
+
+            const beacon = $("status-beacon");
+
+            if (beacon) {
+                beacon.className = "beacon offline";
             }
 
-            // Update Metrics Chart
-            const metricsRes = await fetch('/api/metrics');
-            const metricsData = await metricsRes.json();
-
-            if (latencyChart && metricsData.length > 0) {
-                latencyChart.data.labels = metricsData.map(m => formatTime(m.timestamp));
-                latencyChart.data.datasets[0].data = metricsData.map(m => m.latency);
-                latencyChart.data.datasets[1].data = metricsData.map(m => m.dns_time);
-                latencyChart.update('none');
-            }
-        } catch (err) {
-            console.error('Telemetry fetch error:', err);
+            setText("status-title", "Monitor unavailable");
+            setText(
+                "status-subtitle",
+                "Unable to communicate with the local monitoring service."
+            );
+        } finally {
+            isDashboardUpdating = false;
         }
     }
 
-    // Statistics View
-    const tabBtns = document.querySelectorAll('.btn-tab');
-    tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            tabBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            selectedStatsDays = parseInt(btn.getAttribute('data-days'));
+    // ------------------------------------------------------------
+    // Statistics
+    // ------------------------------------------------------------
+
+    const tabBtns = document.querySelectorAll(".btn-tab");
+
+    tabBtns.forEach((button) => {
+        button.addEventListener("click", () => {
+            tabBtns.forEach((btn) => btn.classList.remove("active"));
+
+            button.classList.add("active");
+
+            selectedStatsDays = Number(button.dataset.days) || 1;
+
             fetchStatistics(selectedStatsDays);
         });
     });
 
     async function fetchStatistics(days) {
         try {
-            const res = await fetch(`/api/statistics?days=${days}`);
-            const data = await res.json();
+            const data = await apiFetch(`/api/statistics?days=${days}`);
 
-            document.getElementById('stats-uptime').textContent = `${data.uptime_percentage}%`;
-            document.getElementById('stats-outages-count').textContent = data.outage_count;
-            document.getElementById('stats-downtime').textContent = formatDuration(data.total_downtime_sec);
-            document.getElementById('stats-longest-outage').textContent = formatDuration(data.longest_outage_sec);
-            document.getElementById('stats-avg-ping').textContent = `${data.avg_latency} ms`;
-            document.getElementById('stats-min-max-ping').textContent = `${data.min_latency} / ${data.max_latency} ms`;
-            document.getElementById('stats-avg-loss').textContent = `${data.avg_packet_loss}%`;
-            document.getElementById('stats-avg-dns').textContent = `${data.avg_dns_time} ms`;
-        } catch (err) {
-            console.error('Error loading stats:', err);
+            setText("stats-uptime", `${formatNumber(data.uptime_percentage)}%`);
+            setText("stats-outages-count", data.outage_count);
+            setText(
+                "stats-downtime",
+                formatDuration(data.total_downtime_sec)
+            );
+            setText(
+                "stats-longest-outage",
+                formatDuration(data.longest_outage_sec)
+            );
+
+            setText(
+                "stats-avg-ping",
+                `${formatNumber(data.avg_latency)} ms`
+            );
+
+            setText(
+                "stats-min-max-ping",
+                `${formatNumber(data.min_latency)} / ${formatNumber(data.max_latency)} ms`
+            );
+
+            setText(
+                "stats-avg-loss",
+                `${formatNumber(data.avg_packet_loss)}%`
+            );
+
+            setText(
+                "stats-avg-dns",
+                `${formatNumber(data.avg_dns_time)} ms`
+            );
+        } catch (error) {
+            console.error("Statistics error:", error);
         }
     }
 
-    // Outages View
-    async function fetchOutages() {
-        try {
-            const res = await fetch('/api/outages');
-            const outages = await res.json();
-            const container = document.getElementById('outages-timeline-list');
+    // ------------------------------------------------------------
+    // Outages
+    // ------------------------------------------------------------
 
-            if (outages.length === 0) {
+    async function fetchOutages() {
+        const container = $("outages-timeline-list");
+
+        if (!container) return;
+
+        try {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="loading-spinner"></div>
+                    <p>Loading outage history...</p>
+                </div>
+            `;
+
+            const outages = await apiFetch("/api/outages");
+
+            if (!Array.isArray(outages) || outages.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        <p>No outages recorded. Connection has been clean!</p>
-                    </div>`;
+                        <div class="empty-icon">✓</div>
+                        <h4>No outages recorded</h4>
+                        <p>Your monitor has not detected any connection outages.</p>
+                    </div>
+                `;
                 return;
             }
 
-            container.innerHTML = outages.map(o => `
-                <div class="timeline-item ${o.status === 'RESOLVED' ? 'resolved' : ''}">
-                    <div class="timeline-content">
-                        <div class="timeline-time">
-                            ${formatTime(o.start_time)} ${o.end_time ? '→ ' + formatTime(o.end_time) : '(Ongoing)'}
-                        </div>
-                        <div class="timeline-duration">
-                            Status: <strong>${o.status}</strong> | Duration: ${formatDuration(o.duration_seconds)}
+            container.innerHTML = outages.map((outage) => {
+                const resolved = outage.status === "RESOLVED";
+
+                return `
+                    <div class="timeline-item ${resolved ? "resolved" : "ongoing"}">
+                        <div class="timeline-marker"></div>
+
+                        <div class="timeline-content">
+                            <div class="timeline-top">
+                                <span class="timeline-status ${resolved ? "resolved" : "ongoing"}">
+                                    ${resolved ? "Resolved" : "Ongoing"}
+                                </span>
+
+                                <span class="timeline-duration">
+                                    ${escapeHtml(formatDuration(outage.duration_seconds))}
+                                </span>
+                            </div>
+
+                            <div class="timeline-time">
+                                ${escapeHtml(formatDateTime(outage.start_time))}
+                                ${outage.end_time
+                                    ? ` → ${escapeHtml(formatDateTime(outage.end_time))}`
+                                    : ""
+                                }
+                            </div>
                         </div>
                     </div>
+                `;
+            }).join("");
+        } catch (error) {
+            console.error("Outage error:", error);
+
+            container.innerHTML = `
+                <div class="empty-state error-state">
+                    <div class="empty-icon">!</div>
+                    <h4>Unable to load outages</h4>
+                    <p>${escapeHtml(error.message)}</p>
                 </div>
-            `).join('');
-        } catch (err) {
-            console.error('Error fetching outages:', err);
+            `;
         }
     }
 
-    // Speed Test
-    const btnSpeedtest = document.getElementById('btn-start-speedtest');
-    btnSpeedtest.addEventListener('click', async () => {
-        btnSpeedtest.disabled = true;
-        btnSpeedtest.textContent = 'Testing...';
-        document.getElementById('speed-val').textContent = '...';
+    // ------------------------------------------------------------
+    // Speed test
+    // ------------------------------------------------------------
 
-        try {
-            const res = await fetch('/api/speedtest', { method: 'POST' });
-            const data = await res.json();
+    const speedTestButton = $("btn-start-speedtest");
 
-            if (data.status === 'success') {
-                document.getElementById('speed-val').textContent = data.download_speed_mbps.toFixed(2);
-                document.getElementById('speed-duration').textContent = `${data.duration_seconds}s`;
-                document.getElementById('speed-bytes').textContent = `${(data.bytes_received / 1024).toFixed(1)} KB`;
-                document.getElementById('speed-time').textContent = formatTime(data.timestamp);
-            } else {
-                alert('Speed test failed');
+    if (speedTestButton) {
+        speedTestButton.addEventListener("click", async () => {
+            speedTestButton.disabled = true;
+            speedTestButton.textContent = "Testing…";
+
+            setText("speed-val", "—");
+            setText("speed-duration", "Running");
+            setText("speed-bytes", "Downloading…");
+            setText("speed-time", "Now");
+
+            try {
+                const data = await apiFetch("/api/speedtest", {
+                    method: "POST"
+                });
+
+                if (data.status !== "success") {
+                    throw new Error(data.message || "Speed test failed.");
+                }
+
+                setText(
+                    "speed-val",
+                    Number(data.download_speed_mbps).toFixed(2)
+                );
+
+                setText(
+                    "speed-duration",
+                    `${data.duration_seconds}s`
+                );
+
+                setText(
+                    "speed-bytes",
+                    formatBytes(data.bytes_received)
+                );
+
+                setText(
+                    "speed-time",
+                    formatDateTime(data.timestamp)
+                );
+            } catch (error) {
+                console.error("Speed test error:", error);
+
+                setText("speed-val", "—");
+                setText("speed-duration", "Failed");
+                setText("speed-bytes", "—");
+                setText("speed-time", "—");
+
+                showToast(error.message, "error");
+            } finally {
+                speedTestButton.disabled = false;
+                speedTestButton.textContent = "Run speed test";
             }
-        } catch (err) {
-            alert('Error running speed test');
-        } finally {
-            btnSpeedtest.disabled = false;
-            btnSpeedtest.textContent = 'Start Speed Test';
-        }
-    });
+        });
+    }
 
+    function formatBytes(bytes) {
+        bytes = Number(bytes) || 0;
+
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) {
+            return `${(bytes / 1024).toFixed(1)} KB`;
+        }
+
+        if (bytes < 1024 * 1024 * 1024) {
+            return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+        }
+
+        return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+
+    // ------------------------------------------------------------
     // Settings
+    // ------------------------------------------------------------
+
     async function loadSettings() {
         try {
-            const res = await fetch('/api/settings');
-            const data = await res.json();
-            document.getElementById('setting-interval').value = data.interval;
-            document.getElementById('setting-ping-target').value = data.ping_target;
-            document.getElementById('setting-dns-target').value = data.dns_target;
-            document.getElementById('setting-retention').value = data.retention_days;
-            document.getElementById('setting-graph-points').value = data.max_graph_points;
-        } catch (err) {
-            console.error('Error loading settings:', err);
+            const data = await apiFetch("/api/settings");
+
+            $("setting-interval").value = data.interval;
+            $("setting-ping-target").value = data.ping_target;
+            $("setting-dns-target").value = data.dns_target;
+            $("setting-retention").value = data.retention_days;
+            $("setting-graph-points").value = data.max_graph_points;
+        } catch (error) {
+            console.error("Settings loading error:", error);
         }
     }
 
-    const settingsForm = document.getElementById('settings-form');
-    settingsForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const payload = {
-            interval: document.getElementById('setting-interval').value,
-            ping_target: document.getElementById('setting-ping-target').value,
-            dns_target: document.getElementById('setting-dns-target').value,
-            retention_days: document.getElementById('setting-retention').value,
-            max_graph_points: document.getElementById('setting-graph-points').value
-        };
+    const settingsForm = $("settings-form");
 
-        try {
-            const res = await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                const msg = document.getElementById('settings-save-status');
-                msg.textContent = 'Settings saved!';
-                setTimeout(() => { msg.textContent = ''; }, 3000);
+    if (settingsForm) {
+        settingsForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const button = settingsForm.querySelector("button[type='submit']");
+            const status = $("settings-save-status");
+
+            const payload = {
+                interval: $("setting-interval").value,
+                ping_target: $("setting-ping-target").value.trim(),
+                dns_target: $("setting-dns-target").value.trim(),
+                retention_days: $("setting-retention").value,
+                max_graph_points: $("setting-graph-points").value
+            };
+
+            button.disabled = true;
+            button.textContent = "Saving…";
+
+            try {
+                await apiFetch("/api/settings", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                status.textContent = "Settings saved";
+                status.className = "status-msg success";
+
+                setTimeout(() => {
+                    status.textContent = "";
+                }, 3000);
+
+                updateDashboard();
+            } catch (error) {
+                console.error("Settings save error:", error);
+
+                status.textContent = error.message;
+                status.className = "status-msg error";
+            } finally {
+                button.disabled = false;
+                button.textContent = "Save settings";
             }
-        } catch (err) {
-            alert('Failed to save settings');
-        }
-    });
+        });
+    }
 
+    // ------------------------------------------------------------
+    // Toast
+    // ------------------------------------------------------------
+
+    function showToast(message, type = "info") {
+        let toast = $("app-toast");
+
+        if (!toast) {
+            toast = document.createElement("div");
+            toast.id = "app-toast";
+            document.body.appendChild(toast);
+        }
+
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+
+        requestAnimationFrame(() => {
+            toast.classList.add("visible");
+        });
+
+        setTimeout(() => {
+            toast.classList.remove("visible");
+        }, 3500);
+    }
+
+    // ------------------------------------------------------------
     // Init
+    // ------------------------------------------------------------
+
     initChart();
     updateDashboard();
-    setInterval(updateDashboard, 3000);
+
+    dashboardTimer = setInterval(updateDashboard, 3000);
+
+    window.addEventListener("beforeunload", () => {
+        if (dashboardTimer) {
+            clearInterval(dashboardTimer);
+        }
+    });
 });
