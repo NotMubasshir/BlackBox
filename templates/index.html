@@ -2,278 +2,706 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>INTERNET BLACK BOX</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="description"
+        content="Black Box local network monitoring dashboard"
+    >
+
+    <title>Black Box — Network Monitor</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+    <script
+        src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+        defer
+    ></script>
+
+    <script
+        src="{{ url_for('static', filename='script.js') }}"
+        defer
+    ></script>
 </head>
+
 <body>
-    <div class="app-container">
-        <!-- Sidebar Navigation -->
-        <aside class="sidebar">
-            <div class="brand">
-                <div class="brand-icon"></div>
-                <div class="brand-text">
-                    <h2>BLACK BOX</h2>
-                    <span>NET OPERATIONS</span>
-                </div>
+
+<div class="app-container">
+
+    <!-- =========================================================
+         SIDEBAR
+         ========================================================= -->
+
+    <aside class="sidebar">
+
+        <div class="brand">
+
+            <div class="brand-icon"></div>
+
+            <div class="brand-text">
+                <h2>BLACK BOX</h2>
+                <span>NETWORK MONITOR</span>
             </div>
 
-            <nav class="nav-menu">
-                <button class="nav-item active" data-target="view-dashboard">
-                    <span class="nav-icon">📊</span> Dashboard
-                </button>
-                <button class="nav-item" data-target="view-statistics">
-                    <span class="nav-icon">📈</span> Statistics
-                </button>
-                <button class="nav-item" data-target="view-outages">
-                    <span class="nav-icon">⚠️</span> Outages
-                </button>
-                <button class="nav-item" data-target="view-speedtest">
-                    <span class="nav-icon">⚡</span> Speed Test
-                </button>
-                <button class="nav-item" data-target="view-settings">
-                    <span class="nav-icon">⚙️</span> Settings
-                </button>
-            </nav>
+        </div>
 
-            <div class="sidebar-footer">
-                <div class="session-info">
-                    <span class="label">SESSION UPTIME</span>
-                    <span id="session-uptime-text">00:00:00</span>
-                </div>
+        <nav class="nav-menu">
+
+            <button
+                class="nav-item active"
+                data-target="view-dashboard"
+                type="button"
+            >
+                <span class="nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                    </svg>
+                </span>
+                Dashboard
+            </button>
+
+            <button
+                class="nav-item"
+                data-target="view-statistics"
+                type="button"
+            >
+                <span class="nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M4 19V5"></path>
+                        <path d="M4 19h17"></path>
+                        <path d="m7 15 4-4 3 2 6-7"></path>
+                    </svg>
+                </span>
+                Statistics
+            </button>
+
+            <button
+                class="nav-item"
+                data-target="view-outages"
+                type="button"
+            >
+                <span class="nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M12 3 21 20H3L12 3Z"></path>
+                        <path d="M12 9v4"></path>
+                        <path d="M12 17h.01"></path>
+                    </svg>
+                </span>
+                Outages
+            </button>
+
+            <button
+                class="nav-item"
+                data-target="view-speedtest"
+                type="button"
+            >
+                <span class="nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M13 2 4 14h7l-1 8 10-13h-7l0-7Z"></path>
+                    </svg>
+                </span>
+                Speed Test
+            </button>
+
+            <button
+                class="nav-item"
+                data-target="view-settings"
+                type="button"
+            >
+                <span class="nav-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-1.9 1.9-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V22h-2.68v-.09a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-1.9-1.9.06-.06A1.7 1.7 0 0 0 7.8 15a1.7 1.7 0 0 0-1.56-1.03H6V11.3h.24A1.7 1.7 0 0 0 7.8 10a1.7 1.7 0 0 0-.34-1.88L7.4 8.06l1.9-1.9.06.06A1.7 1.7 0 0 0 11.24 6a1.7 1.7 0 0 0 1.03-1.56V4h2.68v.44A1.7 1.7 0 0 0 15.98 6a1.7 1.7 0 0 0 1.88-.34l.06-.06 1.9 1.9-.06.06A1.7 1.7 0 0 0 19.42 10a1.7 1.7 0 0 0 1.56 1.03H21v2.67h-.02A1.7 1.7 0 0 0 19.4 15Z"></path>
+                    </svg>
+                </span>
+                Settings
+            </button>
+
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="session-info">
+                <span class="label">MONITOR SESSION</span>
+                <span id="session-uptime-text">00:00:00</span>
             </div>
-        </aside>
+        </div>
 
-        <!-- Main Content Area -->
-        <main class="main-content">
-            <!-- Header Connection Indicator -->
-            <header class="top-bar">
-                <div class="connection-status-container">
-                    <div id="status-beacon" class="beacon offline"></div>
-                    <div class="status-details">
-                        <h1 id="status-title">CHECKING...</h1>
-                        <p id="status-subtitle">Initializing background monitor</p>
-                    </div>
+    </aside>
+
+    <!-- =========================================================
+         MAIN
+         ========================================================= -->
+
+    <main class="main-content">
+
+        <!-- TOP STATUS -->
+
+        <header class="top-bar">
+
+            <div class="connection-status-container">
+
+                <div
+                    id="status-beacon"
+                    class="beacon offline"
+                ></div>
+
+                <div class="status-details">
+
+                    <h1 id="status-title">
+                        Checking connection
+                    </h1>
+
+                    <p id="status-subtitle">
+                        Initializing network monitor…
+                    </p>
+
                 </div>
 
-                <div class="health-badge-container">
-                    <div class="health-score-card">
-                        <span class="health-label">HEALTH SCORE</span>
-                        <div class="health-value-group">
-                            <span id="health-score-val">--</span>
-                            <span class="health-max">/100</span>
-                        </div>
-                    </div>
-                </div>
-            </header>
+            </div>
 
-            <!-- VIEW: DASHBOARD -->
-            <section id="view-dashboard" class="view-section active">
-                <div class="stats-grid">
-                    <div class="card stat-card">
-                        <div class="stat-header">
-                            <span class="stat-title">LATENCY</span>
-                            <span class="stat-icon">📶</span>
-                        </div>
-                        <div class="stat-body">
-                            <span id="card-ping-val" class="stat-main">-- ms</span>
-                            <span id="card-ping-badge" class="badge">--</span>
-                        </div>
-                    </div>
+            <div class="health-score-card">
 
-                    <div class="card stat-card">
-                        <div class="stat-header">
-                            <span class="stat-title">PACKET LOSS</span>
-                            <span class="stat-icon">📉</span>
-                        </div>
-                        <div class="stat-body">
-                            <span id="card-loss-val" class="stat-main">-- %</span>
-                            <span id="card-loss-badge" class="badge">--</span>
-                        </div>
-                    </div>
+                <span class="health-label">
+                    CONNECTION HEALTH
+                </span>
 
-                    <div class="card stat-card">
-                        <div class="stat-header">
-                            <span class="stat-title">DNS LATENCY</span>
-                            <span class="stat-icon">🔍</span>
-                        </div>
-                        <div class="stat-body">
-                            <span id="card-dns-val" class="stat-main">-- ms</span>
-                            <span id="card-dns-badge" class="badge">--</span>
-                        </div>
-                    </div>
-
-                    <div class="card stat-card">
-                        <div class="stat-header">
-                            <span class="stat-title">24H RELIABILITY</span>
-                            <span class="stat-icon">🛡️</span>
-                        </div>
-                        <div class="stat-body">
-                            <span id="card-reliability-val" class="stat-main">-- %</span>
-                            <span class="stat-sub">Based on checks</span>
-                        </div>
-                    </div>
+                <div class="health-value-group">
+                    <span id="health-score-val">--</span>
+                    <span class="health-max">/100</span>
                 </div>
 
-                <div class="dashboard-charts-grid">
-                    <div class="card chart-card">
-                        <div class="card-header">
-                            <h3>Real-Time Latency & DNS Response</h3>
-                            <span class="card-subtitle">Live telemetry stream</span>
-                        </div>
-                        <div class="chart-container">
-                            <canvas id="liveLatencyChart"></canvas>
-                        </div>
+            </div>
+
+        </header>
+
+        <!-- =====================================================
+             DASHBOARD
+             ===================================================== -->
+
+        <section
+            id="view-dashboard"
+            class="view-section active"
+        >
+
+            <div class="stats-grid">
+
+                <div class="card stat-card">
+
+                    <div class="stat-header">
+                        <span class="stat-title">LATENCY</span>
+
+                        <span class="stat-icon">
+                            ↔
+                        </span>
                     </div>
+
+                    <div class="stat-body">
+                        <span
+                            id="card-ping-val"
+                            class="stat-main"
+                        >
+                            --
+                        </span>
+
+                        <span
+                            id="card-ping-badge"
+                            class="badge"
+                        >
+                            --
+                        </span>
+                    </div>
+
                 </div>
-            </section>
 
-            <!-- VIEW: STATISTICS -->
-            <section id="view-statistics" class="view-section">
-                <div class="filter-bar">
-                    <button class="btn btn-tab active" data-days="1">Today</button>
-                    <button class="btn btn-tab" data-days="7">Last 7 Days</button>
-                    <button class="btn btn-tab" data-days="30">Last 30 Days</button>
+                <div class="card stat-card">
+
+                    <div class="stat-header">
+                        <span class="stat-title">PACKET LOSS</span>
+
+                        <span class="stat-icon">
+                            ↓
+                        </span>
+                    </div>
+
+                    <div class="stat-body">
+
+                        <span
+                            id="card-loss-val"
+                            class="stat-main"
+                        >
+                            --
+                        </span>
+
+                        <span
+                            id="card-loss-badge"
+                            class="badge"
+                        >
+                            --
+                        </span>
+
+                    </div>
+
                 </div>
 
-                <div class="stats-grid">
-                    <div class="card stat-card">
-                        <span class="stat-title">RELIABILITY</span>
-                        <span id="stats-uptime" class="stat-main">-- %</span>
+                <div class="card stat-card">
+
+                    <div class="stat-header">
+                        <span class="stat-title">DNS LATENCY</span>
+
+                        <span class="stat-icon">
+                            DNS
+                        </span>
                     </div>
-                    <div class="card stat-card">
-                        <span class="stat-title">TOTAL OUTAGES</span>
-                        <span id="stats-outages-count" class="stat-main">--</span>
+
+                    <div class="stat-body">
+
+                        <span
+                            id="card-dns-val"
+                            class="stat-main"
+                        >
+                            --
+                        </span>
+
+                        <span
+                            id="card-dns-badge"
+                            class="badge"
+                        >
+                            --
+                        </span>
+
                     </div>
-                    <div class="card stat-card">
-                        <span class="stat-title">TOTAL DOWNTIME</span>
-                        <span id="stats-downtime" class="stat-main">0s</span>
-                    </div>
-                    <div class="card stat-card">
-                        <span class="stat-title">LONGEST OUTAGE</span>
-                        <span id="stats-longest-outage" class="stat-main">0s</span>
-                    </div>
+
                 </div>
 
-                <div class="stats-grid secondary">
-                    <div class="card stat-card">
-                        <span class="stat-title">AVG LATENCY</span>
-                        <span id="stats-avg-ping" class="stat-main">-- ms</span>
+                <div class="card stat-card">
+
+                    <div class="stat-header">
+                        <span class="stat-title">24H RELIABILITY</span>
+
+                        <span class="stat-icon">
+                            ✓
+                        </span>
                     </div>
-                    <div class="card stat-card">
-                        <span class="stat-title">MIN / MAX LATENCY</span>
-                        <span id="stats-min-max-ping" class="stat-main">-- / --</span>
+
+                    <div class="stat-body">
+
+                        <span
+                            id="card-reliability-val"
+                            class="stat-main"
+                        >
+                            --
+                        </span>
+
+                        <span class="stat-sub">
+                            Based on checks
+                        </span>
+
                     </div>
-                    <div class="card stat-card">
-                        <span class="stat-title">AVG PACKET LOSS</span>
-                        <span id="stats-avg-loss" class="stat-main">-- %</span>
-                    </div>
-                    <div class="card stat-card">
-                        <span class="stat-title">AVG DNS TIME</span>
-                        <span id="stats-avg-dns" class="stat-main">-- ms</span>
-                    </div>
+
                 </div>
-            </section>
 
-            <!-- VIEW: OUTAGES -->
-            <section id="view-outages" class="view-section">
-                <div class="card">
-                    <div class="card-header">
-                        <h3>Outage Timeline</h3>
-                        <span class="card-subtitle">Recorded connection drops and recovery events</span>
-                    </div>
-                    <div id="outages-timeline-list" class="timeline-list">
-                        <!-- Dynamic content loaded via JS -->
-                    </div>
+            </div>
+
+            <div class="card chart-card">
+
+                <div class="card-header">
+                    <h3>Network response</h3>
+
+                    <span class="card-subtitle">
+                        Live latency measurements from the local monitor
+                    </span>
                 </div>
-            </section>
 
-            <!-- VIEW: SPEED TEST -->
-            <section id="view-speedtest" class="view-section">
-                <div class="card speedtest-card">
-                    <div class="card-header">
-                        <h3>Manual Network Speed Test</h3>
-                        <span class="card-subtitle">Measures actual HTTP download throughput</span>
-                    </div>
-                    <div class="speedtest-content">
-                        <div class="warning-box">
-                            ⚠️ <strong>Note:</strong> Speed tests transfer real network payload to measure bandwidth and will temporarily consume data.
-                        </div>
-
-                        <div class="speed-display">
-                            <span id="speed-val">0.00</span>
-                            <span class="speed-unit">Mbps</span>
-                        </div>
-
-                        <div class="speed-meta">
-                            <div class="meta-item">
-                                <span class="label">Duration:</span>
-                                <span id="speed-duration">--</span>
-                            </div>
-                            <div class="meta-item">
-                                <span class="label">Data Transferred:</span>
-                                <span id="speed-bytes">--</span>
-                            </div>
-                            <div class="meta-item">
-                                <span class="label">Last Ran:</span>
-                                <span id="speed-time">Never</span>
-                            </div>
-                        </div>
-
-                        <button id="btn-start-speedtest" class="btn btn-primary">Start Speed Test</button>
-                    </div>
+                <div class="chart-container">
+                    <canvas id="liveLatencyChart"></canvas>
                 </div>
-            </section>
 
-            <!-- VIEW: SETTINGS -->
-            <section id="view-settings" class="view-section">
-                <div class="card settings-card">
-                    <div class="card-header">
-                        <h3>System Configuration</h3>
-                        <span class="card-subtitle">Adjust network parameters and database limits</span>
-                    </div>
-                    <form id="settings-form" class="settings-form">
-                        <div class="form-group">
-                            <label for="setting-interval">Monitoring Interval (Seconds)</label>
-                            <input type="number" id="setting-interval" name="interval" min="1" max="60" required>
-                            <small>Frequency of background connectivity probes.</small>
-                        </div>
+            </div>
 
-                        <div class="form-group">
-                            <label for="setting-ping-target">Ping Target IP / Host</label>
-                            <input type="text" id="setting-ping-target" name="ping_target" required>
-                            <small>Target server used for standard latency checks (Default: 8.8.8.8).</small>
-                        </div>
+        </section>
 
-                        <div class="form-group">
-                            <label for="setting-dns-target">DNS Probe Domain</label>
-                            <input type="text" id="setting-dns-target" name="dns_target" required>
-                            <small>Domain name resolved to test DNS responsiveness (Default: one.one.one.one).</small>
-                        </div>
+        <!-- =====================================================
+             STATISTICS
+             ===================================================== -->
 
-                        <div class="form-group">
-                            <label for="setting-retention">Data Retention (Days)</label>
-                            <input type="number" id="setting-retention" name="retention_days" min="1" max="90" required>
-                            <small>Historical records older than this will be pruned automatically.</small>
-                        </div>
+        <section
+            id="view-statistics"
+            class="view-section"
+        >
 
-                        <div class="form-group">
-                            <label for="setting-graph-points">Max Dashboard Chart Points</label>
-                            <input type="number" id="setting-graph-points" name="max_graph_points" min="10" max="100" required>
-                            <small>Number of data points shown in the live dashboard graph.</small>
-                        </div>
+            <div class="filter-bar">
 
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">Save Settings</button>
-                            <span id="settings-save-status" class="status-msg"></span>
-                        </div>
-                    </form>
+                <button
+                    class="btn btn-tab active"
+                    data-days="1"
+                    type="button"
+                >
+                    Today
+                </button>
+
+                <button
+                    class="btn btn-tab"
+                    data-days="7"
+                    type="button"
+                >
+                    7 days
+                </button>
+
+                <button
+                    class="btn btn-tab"
+                    data-days="30"
+                    type="button"
+                >
+                    30 days
+                </button>
+
+            </div>
+
+            <div class="stats-grid">
+
+                <div class="card stat-card">
+                    <span class="stat-title">RELIABILITY</span>
+                    <span
+                        id="stats-uptime"
+                        class="stat-main"
+                    >
+                        --%
+                    </span>
                 </div>
-            </section>
-        </main>
-    </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+                <div class="card stat-card">
+                    <span class="stat-title">TOTAL OUTAGES</span>
+                    <span
+                        id="stats-outages-count"
+                        class="stat-main"
+                    >
+                        --
+                    </span>
+                </div>
+
+                <div class="card stat-card">
+                    <span class="stat-title">TOTAL DOWNTIME</span>
+                    <span
+                        id="stats-downtime"
+                        class="stat-main"
+                    >
+                        0s
+                    </span>
+                </div>
+
+                <div class="card stat-card">
+                    <span class="stat-title">LONGEST OUTAGE</span>
+                    <span
+                        id="stats-longest-outage"
+                        class="stat-main"
+                    >
+                        0s
+                    </span>
+                </div>
+
+            </div>
+
+            <div class="stats-grid">
+
+                <div class="card stat-card">
+                    <span class="stat-title">AVG LATENCY</span>
+                    <span
+                        id="stats-avg-ping"
+                        class="stat-main"
+                    >
+                        -- ms
+                    </span>
+                </div>
+
+                <div class="card stat-card">
+                    <span class="stat-title">MIN / MAX LATENCY</span>
+                    <span
+                        id="stats-min-max-ping"
+                        class="stat-main"
+                    >
+                        -- / --
+                    </span>
+                </div>
+
+                <div class="card stat-card">
+                    <span class="stat-title">AVG PACKET LOSS</span>
+                    <span
+                        id="stats-avg-loss"
+                        class="stat-main"
+                    >
+                        --%
+                    </span>
+                </div>
+
+                <div class="card stat-card">
+                    <span class="stat-title">AVG DNS TIME</span>
+                    <span
+                        id="stats-avg-dns"
+                        class="stat-main"
+                    >
+                        -- ms
+                    </span>
+                </div>
+
+            </div>
+
+        </section>
+
+        <!-- =====================================================
+             OUTAGES
+             ===================================================== -->
+
+        <section
+            id="view-outages"
+            class="view-section"
+        >
+
+            <div class="card">
+
+                <div class="card-header">
+                    <h3>Outage history</h3>
+
+                    <span class="card-subtitle">
+                        Connection interruptions detected by the monitor
+                    </span>
+                </div>
+
+                <div
+                    id="outages-timeline-list"
+                    class="timeline-list"
+                ></div>
+
+            </div>
+
+        </section>
+
+        <!-- =====================================================
+             SPEED TEST
+             ===================================================== -->
+
+        <section
+            id="view-speedtest"
+            class="view-section"
+        >
+
+            <div class="card">
+
+                <div class="card-header">
+                    <h3>Internet speed test</h3>
+
+                    <span class="card-subtitle">
+                        Measures download throughput using a real HTTP transfer
+                    </span>
+                </div>
+
+                <div class="speedtest-content">
+
+                    <div class="warning-box">
+                        Speed tests download real data and may temporarily consume bandwidth.
+                    </div>
+
+                    <div class="speed-display">
+
+                        <span id="speed-val">
+                            0.00
+                        </span>
+
+                        <span class="speed-unit">
+                            Mbps
+                        </span>
+
+                    </div>
+
+                    <div class="speed-meta">
+
+                        <div class="meta-item">
+                            <span class="label">Duration</span>
+                            <span id="speed-duration">--</span>
+                        </div>
+
+                        <div class="meta-item">
+                            <span class="label">Transferred</span>
+                            <span id="speed-bytes">--</span>
+                        </div>
+
+                        <div class="meta-item">
+                            <span class="label">Last run</span>
+                            <span id="speed-time">Never</span>
+                        </div>
+
+                    </div>
+
+                    <button
+                        id="btn-start-speedtest"
+                        class="btn btn-primary"
+                        type="button"
+                    >
+                        Run speed test
+                    </button>
+
+                </div>
+
+            </div>
+
+        </section>
+
+        <!-- =====================================================
+             SETTINGS
+             ===================================================== -->
+
+        <section
+            id="view-settings"
+            class="view-section"
+        >
+
+            <div class="card settings-card">
+
+                <div class="card-header">
+                    <h3>Monitor settings</h3>
+
+                    <span class="card-subtitle">
+                        Configure monitoring frequency, targets and data retention
+                    </span>
+                </div>
+
+                <form
+                    id="settings-form"
+                    class="settings-form"
+                >
+
+                    <div class="form-group">
+
+                        <label for="setting-interval">
+                            Monitoring interval
+                        </label>
+
+                        <input
+                            type="number"
+                            id="setting-interval"
+                            min="1"
+                            max="60"
+                            required
+                        >
+
+                        <small>
+                            Seconds between network checks.
+                        </small>
+
+                    </div>
+
+                    <div class="form-group">
+
+                        <label for="setting-ping-target">
+                            Ping target
+                        </label>
+
+                        <input
+                            type="text"
+                            id="setting-ping-target"
+                            maxlength="253"
+                            required
+                        >
+
+                        <small>
+                            Host or IP used for latency checks.
+                        </small>
+
+                    </div>
+
+                    <div class="form-group">
+
+                        <label for="setting-dns-target">
+                            DNS target
+                        </label>
+
+                        <input
+                            type="text"
+                            id="setting-dns-target"
+                            maxlength="253"
+                            required
+                        >
+
+                        <small>
+                            Hostname used to measure DNS resolution time.
+                        </small>
+
+                    </div>
+
+                    <div class="form-group">
+
+                        <label for="setting-retention">
+                            Data retention
+                        </label>
+
+                        <input
+                            type="number"
+                            id="setting-retention"
+                            min="1"
+                            max="90"
+                            required
+                        >
+
+                        <small>
+                            Historical data older than this is removed automatically.
+                        </small>
+
+                    </div>
+
+                    <div class="form-group">
+
+                        <label for="setting-graph-points">
+                            Dashboard chart points
+                        </label>
+
+                        <input
+                            type="number"
+                            id="setting-graph-points"
+                            min="10"
+                            max="200"
+                            required
+                        >
+
+                        <small>
+                            Number of recent measurements displayed on the live chart.
+                        </small>
+
+                    </div>
+
+                    <div class="form-actions">
+
+                        <button
+                            type="submit"
+                            class="btn btn-primary"
+                        >
+                            Save settings
+                        </button>
+
+                        <span
+                            id="settings-save-status"
+                            class="status-msg"
+                        ></span>
+
+                    </div>
+
+                </form>
+
+            </div>
+
+        </section>
+
+    </main>
+
+</div>
+
 </body>
 </html>
