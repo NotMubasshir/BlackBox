@@ -123,7 +123,7 @@ The interface is built using:
 ## Project structure
 
 ```text
-internet-black-box/
+BlackBox/
 │
 ├── app.py
 ├── monitor.py
