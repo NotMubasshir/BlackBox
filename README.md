@@ -165,7 +165,7 @@ Clone the repository:
 ```
 Bash
 
-git clone https://github.com/NotMubasshir/internet-black-box.gitcd internet-black-box
+git clone https://github.com/NotMubasshir/BlackBox.gitcd BlackBox
 ```
 ## Install dependencies:
 ```
