@@ -1,7 +1,7 @@
-import os
 import time
-import socket
+import threading
 import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 
 from flask import Flask, jsonify, render_template, request
@@ -9,302 +9,368 @@ from flask import Flask, jsonify, render_template, request
 import database
 from monitor import NetworkMonitor
 
-
 app = Flask(__name__)
-monitor = NetworkMonitor()
+
+_monitor_lock = threading.Lock()
+monitor = None
 
 
-# ============================================================
-# START MONITOR
-# ============================================================
+def ensure_monitor_started():
+    global monitor
+
+    with _monitor_lock:
+        if monitor is None or not monitor.is_alive():
+            monitor = NetworkMonitor()
+            monitor.start()
+
+        return monitor
+
+
+# Make sure the database exists before requests begin.
+database.init_db()
+ensure_monitor_started()
+
 
 @app.before_request
-def ensure_monitor_started():
-    if not monitor.is_alive():
-        monitor.start()
+def before_request():
+    ensure_monitor_started()
 
 
-# ============================================================
-# MAIN PAGE
-# ============================================================
-
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
 
-# ============================================================
-# STATUS API
-# ============================================================
-
-@app.route('/api/status', methods=['GET'])
+@app.route("/api/status")
 def get_status():
     metrics = database.get_latest_metrics(limit=1)
 
     current = metrics[0] if metrics else {
-        'status': 'UNKNOWN',
-        'latency': None,
-        'packet_loss': 100,
-        'dns_time': None,
-        'timestamp': datetime.now(timezone.utc).isoformat()
+        "status": "UNKNOWN",
+        "latency": None,
+        "packet_loss": None,
+        "dns_time": None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     stats_today = database.get_statistics(days=1)
 
-    is_online = current['status'] == 'ONLINE'
+    is_online = current.get("status") == "ONLINE"
 
-    health_score = monitor.calculate_health_score(
-        latency=current.get('latency'),
-        packet_loss=current.get('packet_loss', 0),
-        dns_time=current.get('dns_time'),
-        is_online=is_online
+    active_monitor = ensure_monitor_started()
+
+    health_score = active_monitor.calculate_health_score(
+        latency=current.get("latency"),
+        packet_loss=current.get("packet_loss") or 0,
+        dns_time=current.get("dns_time"),
+        is_online=is_online,
     )
 
     now = datetime.now(timezone.utc)
-    session_duration_sec = int(
-        (now - monitor.session_start).total_seconds()
+
+    session_duration = int(
+        (now - active_monitor.session_start).total_seconds()
     )
 
     return jsonify({
-        'status': current['status'],
-        'latency': current.get('latency'),
-        'packet_loss': current.get('packet_loss'),
-        'dns_time': current.get('dns_time'),
-        'timestamp': current.get('timestamp'),
-        'health_score': health_score,
-        'reliability_today': stats_today['uptime_percentage'],
-        'session_duration_seconds': session_duration_sec
+        "status": current.get("status", "UNKNOWN"),
+        "latency": current.get("latency"),
+        "packet_loss": current.get("packet_loss"),
+        "dns_time": current.get("dns_time"),
+        "timestamp": current.get("timestamp"),
+        "health_score": health_score,
+        "reliability_today": stats_today["uptime_percentage"],
+        "session_duration_seconds": session_duration,
     })
 
 
-# ============================================================
-# LIVE METRICS
-# ============================================================
-
-@app.route('/api/metrics', methods=['GET'])
+@app.route("/api/metrics")
 def get_metrics():
     settings = database.get_settings()
 
-    try:
-        limit = int(settings.get('max_graph_points', 30))
-    except (ValueError, TypeError):
-        limit = 30
+    limit = int(
+        settings.get("max_graph_points", 40)
+    )
 
-    metrics = database.get_latest_metrics(limit=limit)
+    return jsonify(
+        database.get_latest_metrics(limit=limit)
+    )
 
-    return jsonify(metrics)
 
-
-# ============================================================
-# OUTAGES
-# ============================================================
-
-@app.route('/api/outages', methods=['GET'])
+@app.route("/api/outages")
 def get_outages():
-    limit = request.args.get('limit', default=20, type=int)
+    limit = request.args.get(
+        "limit",
+        default=20,
+        type=int
+    )
 
-    # Prevent ridiculous values
     limit = max(1, min(limit, 100))
 
-    outages = database.get_recent_outages(limit=limit)
+    return jsonify(
+        database.get_recent_outages(limit=limit)
+    )
 
-    return jsonify(outages)
 
-
-# ============================================================
-# STATISTICS
-# ============================================================
-
-@app.route('/api/statistics', methods=['GET'])
+@app.route("/api/statistics")
 def get_statistics():
-    days = request.args.get('days', default=1, type=int)
+    days = request.args.get(
+        "days",
+        default=1,
+        type=int
+    )
 
-    # Keep the API within the UI's supported range
     days = max(1, min(days, 30))
 
-    stats = database.get_statistics(days=days)
+    return jsonify(
+        database.get_statistics(days=days)
+    )
 
-    return jsonify(stats)
 
-
-# ============================================================
-# SETTINGS
-# ============================================================
-
-@app.route('/api/settings', methods=['GET', 'POST'])
+@app.route("/api/settings", methods=["GET", "POST"])
 def handle_settings():
 
-    if request.method == 'POST':
+    if request.method == "GET":
+        return jsonify(
+            database.get_settings()
+        )
 
-        data = request.get_json(silent=True) or {}
+    data = request.get_json(
+        silent=True
+    ) or {}
 
-        valid_keys = [
-            'interval',
-            'ping_target',
-            'dns_target',
-            'retention_days',
-            'max_graph_points'
-        ]
+    errors = []
 
-        for key in valid_keys:
+    numeric_rules = {
+        "interval": (1, 60),
+        "retention_days": (1, 90),
+        "max_graph_points": (10, 100),
+    }
 
-            if key not in data:
-                continue
+    for key, (minimum, maximum) in numeric_rules.items():
 
-            val = str(data[key]).strip()
+        if key not in data:
+            continue
 
-            # Numeric settings
-            if key in [
-                'interval',
-                'retention_days',
-                'max_graph_points'
-            ]:
+        try:
+            value = int(data[key])
 
-                try:
-                    num = int(val)
-                except ValueError:
-                    continue
+            if not minimum <= value <= maximum:
+                raise ValueError
 
-                if num <= 0:
-                    continue
+            database.update_setting(
+                key,
+                value
+            )
 
-                # Sensible limits
-                if key == 'interval':
-                    num = max(1, min(num, 60))
+        except (TypeError, ValueError):
+            errors.append(
+                f"{key} must be between "
+                f"{minimum} and {maximum}."
+            )
 
-                elif key == 'retention_days':
-                    num = max(1, min(num, 90))
+    for key in (
+        "ping_target",
+        "dns_target",
+        "dns_probe_domain",
+    ):
 
-                elif key == 'max_graph_points':
-                    num = max(10, min(num, 100))
+        if key not in data:
+            continue
 
-                val = str(num)
+        value = str(
+            data[key]
+        ).strip()
 
-            # Text settings
-            elif key in ['ping_target', 'dns_target']:
+        if not value:
+            errors.append(
+                f"{key} cannot be empty."
+            )
 
-                if not val:
-                    continue
+        elif len(value) > 255:
+            errors.append(
+                f"{key} is too long."
+            )
 
-            database.update_setting(key, val)
+        else:
+            database.update_setting(
+                key,
+                value
+            )
 
+    if errors:
         return jsonify({
-            'status': 'success',
-            'settings': database.get_settings()
-        })
+            "status": "error",
+            "errors": errors,
+        }), 400
 
-    return jsonify(database.get_settings())
+    return jsonify({
+        "status": "success",
+        "settings": database.get_settings(),
+    })
 
 
-# ============================================================
-# REAL DOWNLOAD SPEED TEST
-# ============================================================
-
-@app.route('/api/speedtest', methods=['POST'])
+@app.route("/api/speedtest", methods=["POST"])
 def run_speedtest():
 
-    # --------------------------------------------------------
-    # Configuration
-    # --------------------------------------------------------
+    """
+    Sustained download test.
 
-    # Cloudflare's speed-test download endpoint.
-    # 25 MB gives the connection enough data to measure properly.
-    TEST_URL = "https://speed.cloudflare.com/__down?bytes=25000000"
+    The old implementation requested:
 
-    # Maximum duration of the test.
-    TEST_DURATION = 8.0
+        http://1.1.1.1/
 
-    # Read data in chunks.
-    CHUNK_SIZE = 64 * 1024  # 64 KB
+    That isn't a bandwidth-test file and can return 403.
 
-    bytes_downloaded = 0
+    This version uses Cloudflare's dedicated speed-test
+    download endpoint instead.
+    """
 
-    start_time = time.perf_counter()
+    test_duration = 10.0
+    max_bytes = 200 * 1024 * 1024
+    chunk_size = 64 * 1024
+
+    total_bytes = 0
+
+    start = time.perf_counter()
+
+    last_error = None
 
     try:
 
-        request_obj = urllib.request.Request(
-            TEST_URL,
-            headers={
-                "User-Agent": "InternetBlackBox/1.0"
-            }
+        while (
+            time.perf_counter() - start < test_duration
+            and total_bytes < max_bytes
+        ):
+
+            remaining = max_bytes - total_bytes
+
+            request_url = (
+                "https://speed.cloudflare.com/"
+                "__down?bytes="
+                f"{min(25_000_000, remaining)}"
+            )
+
+            req = urllib.request.Request(
+                request_url,
+                headers={
+                    "User-Agent":
+                        "InternetBlackBox/2.0",
+
+                    "Accept":
+                        "*/*",
+
+                    "Cache-Control":
+                        "no-cache",
+                },
+                method="GET",
+            )
+
+            try:
+
+                with urllib.request.urlopen(
+                    req,
+                    timeout=8
+                ) as response:
+
+                    while (
+                        time.perf_counter() - start
+                        < test_duration
+                        and total_bytes < max_bytes
+                    ):
+
+                        chunk = response.read(
+                            chunk_size
+                        )
+
+                        if not chunk:
+                            break
+
+                        total_bytes += len(chunk)
+
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                OSError
+            ) as exc:
+
+                last_error = str(exc)
+
+                break
+
+        elapsed = max(
+            time.perf_counter() - start,
+            0.001
         )
 
-        with urllib.request.urlopen(
-            request_obj,
-            timeout=12
-        ) as response:
+        if total_bytes <= 0:
 
-            while True:
-
-                # Stop after the configured test duration.
-                elapsed = time.perf_counter() - start_time
-
-                if elapsed >= TEST_DURATION:
-                    break
-
-                chunk = response.read(CHUNK_SIZE)
-
-                if not chunk:
-                    break
-
-                bytes_downloaded += len(chunk)
-
-        elapsed = time.perf_counter() - start_time
-
-        # Protect against extremely tiny elapsed times.
-        elapsed = max(elapsed, 0.001)
-
-        # ----------------------------------------------------
-        # Calculate speed
-        # ----------------------------------------------------
+            return jsonify({
+                "status": "error",
+                "message":
+                    "No test data was received. "
+                    + (
+                        last_error
+                        or
+                        "The speed-test server did not respond."
+                    ),
+            }), 502
 
         speed_mbps = (
-            bytes_downloaded * 8
-        ) / (
-            elapsed * 1_000_000
+            total_bytes * 8
+        ) / elapsed / 1_000_000
+
+        active_monitor = ensure_monitor_started()
+
+        ping = active_monitor.measure_ping(
+            "1.1.1.1"
         )
 
-        speed_mbps = round(speed_mbps, 2)
-
         return jsonify({
-            'status': 'success',
-            'download_speed_mbps': speed_mbps,
-            'duration_seconds': round(elapsed, 2),
-            'bytes_received': bytes_downloaded,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'test_size_mb': round(
-                bytes_downloaded / (1024 * 1024),
-                2
-            ),
-            'note': '8-second sustained download speed test'
+            "status": "success",
+
+            "download_speed_mbps":
+                round(speed_mbps, 2),
+
+            "duration_seconds":
+                round(elapsed, 2),
+
+            "bytes_received":
+                total_bytes,
+
+            "timestamp":
+                datetime.now(
+                    timezone.utc
+                ).isoformat(),
+
+            "latency_ms":
+                (
+                    round(ping, 2)
+                    if ping is not None
+                    else None
+                ),
+
+            "server":
+                "Cloudflare edge",
+
+            "test_type":
+                "sustained HTTP download",
         })
 
-    except Exception as e:
-
-        elapsed = time.perf_counter() - start_time
+    except Exception as exc:
 
         return jsonify({
-            'status': 'error',
-            'message': str(e),
-            'duration_seconds': round(elapsed, 2),
-            'bytes_received': bytes_downloaded
+            "status": "error",
+            "message":
+                f"Speed test failed: {exc}",
         }), 500
 
 
-# ============================================================
-# APPLICATION START
-# ============================================================
-
-if __name__ == '__main__':
-
-    database.init_db()
-
-    if not monitor.is_alive():
-        monitor.start()
+if __name__ == "__main__":
 
     app.run(
-        host='127.0.0.1',
+        host="127.0.0.1",
         port=5000,
-        debug=False
+        debug=False,
+        threaded=True,
     )
