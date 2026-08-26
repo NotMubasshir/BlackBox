@@ -1,802 +1,1388 @@
 document.addEventListener("DOMContentLoaded", () => {
+
     let latencyChart = null;
     let selectedStatsDays = 1;
-    let dashboardTimer = null;
-    let isDashboardUpdating = false;
+    let speedProgressTimer = null;
 
-    // ------------------------------------------------------------
-    // DOM helpers
-    // ------------------------------------------------------------
 
-    const $ = (id) => document.getElementById(id);
+    const $ = (id) =>
+        document.getElementById(id);
 
-    function setText(id, value) {
-        const element = $(id);
-        if (element) {
-            element.textContent = value;
+
+    /* ---------------- NAVIGATION ---------------- */
+
+    document.querySelectorAll(".nav-item").forEach(
+        (item) => {
+
+            item.addEventListener(
+                "click",
+                () => {
+
+                    const target =
+                        item.dataset.target;
+
+                    document
+                        .querySelectorAll(".nav-item")
+                        .forEach(
+                            n =>
+                                n.classList.remove(
+                                    "active"
+                                )
+                        );
+
+                    document
+                        .querySelectorAll(
+                            ".view-section"
+                        )
+                        .forEach(
+                            v =>
+                                v.classList.remove(
+                                    "active"
+                                )
+                        );
+
+                    item.classList.add(
+                        "active"
+                    );
+
+                    $(target)?.classList.add(
+                        "active"
+                    );
+
+
+                    if (
+                        target ===
+                        "view-statistics"
+                    ) {
+                        fetchStatistics(
+                            selectedStatsDays
+                        );
+                    }
+
+
+                    if (
+                        target ===
+                        "view-outages"
+                    ) {
+                        fetchOutages();
+                    }
+
+
+                    if (
+                        target ===
+                        "view-settings"
+                    ) {
+                        loadSettings();
+                    }
+
+                }
+            );
+
         }
-    }
+    );
 
-    function escapeHtml(value) {
-        return String(value ?? "")
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    }
 
-    // ------------------------------------------------------------
-    // Navigation
-    // ------------------------------------------------------------
+    /* ---------------- FORMATTING ---------------- */
 
-    const navItems = document.querySelectorAll(".nav-item");
-    const viewSections = document.querySelectorAll(".view-section");
+    function formatTime(
+        isoString
+    ) {
 
-    navItems.forEach((item) => {
-        item.addEventListener("click", () => {
-            const target = item.dataset.target;
-            const targetSection = $(target);
+        if (!isoString)
+            return "--";
 
-            if (!targetSection) return;
+        const d =
+            new Date(
+                isoString
+            );
 
-            navItems.forEach((nav) => nav.classList.remove("active"));
-            viewSections.forEach((view) => view.classList.remove("active"));
+        return d.toLocaleTimeString(
+            [],
+            {
+                hour:
+                    "2-digit",
 
-            item.classList.add("active");
-            targetSection.classList.add("active");
+                minute:
+                    "2-digit",
 
-            if (target === "view-statistics") {
-                fetchStatistics(selectedStatsDays);
+                second:
+                    "2-digit"
             }
-
-            if (target === "view-outages") {
-                fetchOutages();
-            }
-
-            if (target === "view-settings") {
-                loadSettings();
-            }
-        });
-    });
-
-    // ------------------------------------------------------------
-    // Formatting
-    // ------------------------------------------------------------
-
-    function formatTime(isoString) {
-        if (!isoString) return "--:--:--";
-
-        const date = new Date(isoString);
-
-        if (Number.isNaN(date.getTime())) {
-            return "--:--:--";
-        }
-
-        return date.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit"
-        });
+        );
     }
 
-    function formatDateTime(isoString) {
-        if (!isoString) return "Unknown";
 
-        const date = new Date(isoString);
+    function formatDuration(
+        seconds
+    ) {
 
-        if (Number.isNaN(date.getTime())) {
-            return "Unknown";
-        }
-
-        return date.toLocaleString([], {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit"
-        });
-    }
-
-    function formatDuration(seconds) {
-        if (seconds === null || seconds === undefined) {
+        if (
+            seconds === null ||
+            seconds === undefined
+        ) {
             return "Ongoing";
         }
 
-        seconds = Math.max(0, Math.floor(Number(seconds)));
+        seconds =
+            Math.max(
+                0,
+                Math.round(
+                    Number(seconds)
+                )
+            );
 
-        const days = Math.floor(seconds / 86400);
-        const hours = Math.floor((seconds % 86400) / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = seconds % 60;
+        const hours =
+            Math.floor(
+                seconds / 3600
+            );
 
-        if (days > 0) {
-            return `${days}d ${hours}h ${minutes}m`;
-        }
+        const mins =
+            Math.floor(
+                (seconds % 3600) / 60
+            );
 
-        if (hours > 0) {
-            return `${hours}h ${minutes}m ${secs}s`;
-        }
+        const secs =
+            seconds % 60;
 
-        if (minutes > 0) {
-            return `${minutes}m ${secs}s`;
-        }
+
+        if (hours)
+            return `${hours}h ${mins}m`;
+
+        if (mins)
+            return `${mins}m ${secs}s`;
 
         return `${secs}s`;
     }
 
-    function formatSessionUptime(totalSeconds) {
-        totalSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
 
-        const days = Math.floor(totalSeconds / 86400);
-        const hours = Math.floor((totalSeconds % 86400) / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
+    function formatUptime(
+        totalSeconds
+    ) {
 
-        if (days > 0) {
-            return `${days}d ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-        }
+        totalSeconds =
+            Math.max(
+                0,
+                Number(totalSeconds) || 0
+            );
 
-        return [
-            String(hours).padStart(2, "0"),
-            String(minutes).padStart(2, "0"),
-            String(seconds).padStart(2, "0")
-        ].join(":");
+        const h =
+            Math.floor(
+                totalSeconds / 3600
+            );
+
+        const m =
+            Math.floor(
+                (totalSeconds % 3600) / 60
+            );
+
+        const s =
+            Math.floor(
+                totalSeconds % 60
+            );
+
+
+        return (
+            `${String(h).padStart(2, "0")}:` +
+            `${String(m).padStart(2, "0")}:` +
+            `${String(s).padStart(2, "0")}`
+        );
     }
 
-    function formatNumber(value, decimals = 2) {
-        if (value === null || value === undefined || Number.isNaN(Number(value))) {
-            return "--";
-        }
 
-        return Number(value).toFixed(decimals);
+    function setMetricNote(
+        id,
+        text,
+        type = ""
+    ) {
+
+        const el = $(id);
+
+        el.textContent =
+            text;
+
+        el.className =
+            `metric-note ${type}`;
     }
 
-    // ------------------------------------------------------------
-    // API helper
-    // ------------------------------------------------------------
 
-    async function apiFetch(url, options = {}) {
-        const response = await fetch(url, {
-            cache: "no-store",
-            ...options
-        });
-
-        let data;
-
-        try {
-            data = await response.json();
-        } catch {
-            throw new Error(`Server returned HTTP ${response.status}`);
-        }
-
-        if (!response.ok) {
-            throw new Error(data.message || `Request failed (${response.status})`);
-        }
-
-        return data;
-    }
-
-    // ------------------------------------------------------------
-    // Chart
-    // ------------------------------------------------------------
+    /* ---------------- CHART ---------------- */
 
     function initChart() {
-        const canvas = $("liveLatencyChart");
 
-        if (!canvas || typeof Chart === "undefined") {
-            console.error("Chart.js is unavailable.");
+        const canvas =
+            $("liveLatencyChart");
+
+        if (
+            !canvas ||
+            typeof Chart === "undefined"
+        ) {
             return;
         }
 
-        const ctx = canvas.getContext("2d");
 
-        latencyChart = new Chart(ctx, {
-            type: "line",
+        const ctx =
+            canvas.getContext(
+                "2d"
+            );
 
-            data: {
-                labels: [],
 
-                datasets: [
-                    {
-                        label: "Ping",
-                        data: [],
-                        borderColor: "#22d3ee",
-                        backgroundColor: "rgba(34, 211, 238, 0.08)",
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        pointHoverRadius: 4,
-                        tension: 0.35,
-                        fill: true,
-                        spanGaps: true
-                    },
-                    {
-                        label: "DNS",
-                        data: [],
-                        borderColor: "#60a5fa",
-                        backgroundColor: "transparent",
-                        borderWidth: 1.5,
-                        pointRadius: 0,
-                        pointHoverRadius: 4,
-                        borderDash: [5, 5],
-                        tension: 0.35,
-                        fill: false,
-                        spanGaps: true
-                    }
-                ]
-            },
+        latencyChart =
+            new Chart(
+                ctx,
+                {
+                    type:
+                        "line",
 
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
+                    data:
+                        {
+                            labels:
+                                [],
 
-                interaction: {
-                    intersect: false,
-                    mode: "index"
-                },
+                            datasets:
+                                [
+                                    {
+                                        label:
+                                            "Ping",
 
-                animation: false,
+                                        data:
+                                            [],
 
-                scales: {
-                    x: {
-                        grid: {
-                            color: "rgba(148, 163, 184, 0.07)"
-                        },
-                        border: {
-                            display: false
-                        },
-                        ticks: {
-                            color: "#64748b",
-                            maxTicksLimit: 8,
-                            font: {
-                                family: "Inter, system-ui, sans-serif",
-                                size: 10
-                            }
-                        }
-                    },
+                                        borderColor:
+                                            "#42e6d0",
 
-                    y: {
-                        beginAtZero: true,
+                                        backgroundColor:
+                                            "rgba(66,230,208,.08)",
 
-                        grid: {
-                            color: "rgba(148, 163, 184, 0.07)"
-                        },
+                                        borderWidth:
+                                            2,
 
-                        border: {
-                            display: false
+                                        pointRadius:
+                                            0,
+
+                                        pointHoverRadius:
+                                            4,
+
+                                        tension:
+                                            .38,
+
+                                        fill:
+                                            true
+                                    },
+
+                                    {
+                                        label:
+                                            "DNS",
+
+                                        data:
+                                            [],
+
+                                        borderColor:
+                                            "#6fa8ff",
+
+                                        borderWidth:
+                                            1.5,
+
+                                        pointRadius:
+                                            0,
+
+                                        tension:
+                                            .38
+                                    }
+                                ]
                         },
 
-                        ticks: {
-                            color: "#64748b",
-                            font: {
-                                family: "Inter, system-ui, sans-serif",
-                                size: 10
-                            },
+                    options:
+                        {
+                            responsive:
+                                true,
 
-                            callback: (value) => `${value} ms`
-                        }
-                    }
-                },
+                            maintainAspectRatio:
+                                false,
 
-                plugins: {
-                    legend: {
-                        position: "top",
-                        align: "start",
+                            interaction:
+                                {
+                                    intersect:
+                                        false,
 
-                        labels: {
-                            color: "#94a3b8",
-                            usePointStyle: true,
-                            pointStyle: "line",
-                            boxWidth: 28,
-                            padding: 18
-                        }
-                    },
+                                    mode:
+                                        "index"
+                                },
 
-                    tooltip: {
-                        backgroundColor: "#111827",
-                        borderColor: "rgba(148, 163, 184, 0.15)",
-                        borderWidth: 1,
-                        titleColor: "#f8fafc",
-                        bodyColor: "#cbd5e1",
-                        padding: 12,
+                            plugins:
+                                {
+                                    legend:
+                                        {
+                                            labels:
+                                                {
+                                                    color:
+                                                        "#9aa7b4",
 
-                        callbacks: {
-                            label: (context) => {
-                                const value = context.raw;
+                                                    boxWidth:
+                                                        10,
 
-                                if (value === null || value === undefined) {
-                                    return `${context.dataset.label}: unavailable`;
+                                                    usePointStyle:
+                                                        true,
+
+                                                    font:
+                                                        {
+                                                            size:
+                                                                10
+                                                        }
+                                                }
+                                        }
+                                },
+
+                            scales:
+                                {
+                                    x:
+                                        {
+                                            grid:
+                                                {
+                                                    color:
+                                                        "rgba(255,255,255,.035)"
+                                                },
+
+                                            ticks:
+                                                {
+                                                    color:
+                                                        "#647180",
+
+                                                    maxTicksLimit:
+                                                        7,
+
+                                                    font:
+                                                        {
+                                                            size:
+                                                                9
+                                                        }
+                                                }
+                                        },
+
+                                    y:
+                                        {
+                                            beginAtZero:
+                                                true,
+
+                                            grid:
+                                                {
+                                                    color:
+                                                        "rgba(255,255,255,.035)"
+                                                },
+
+                                            ticks:
+                                                {
+                                                    color:
+                                                        "#647180",
+
+                                                    font:
+                                                        {
+                                                            size:
+                                                                9
+                                                        }
+                                                }
+                                        }
                                 }
-
-                                return `${context.dataset.label}: ${value} ms`;
-                            }
                         }
-                    }
                 }
-            }
-        });
+            );
     }
 
-    function updateChart(metrics) {
-        if (!latencyChart) return;
 
-        latencyChart.data.labels = metrics.map((metric) =>
-            formatTime(metric.timestamp)
-        );
-
-        latencyChart.data.datasets[0].data = metrics.map((metric) =>
-            metric.latency === null ? null : metric.latency
-        );
-
-        latencyChart.data.datasets[1].data = metrics.map((metric) =>
-            metric.dns_time === null ? null : metric.dns_time
-        );
-
-        latencyChart.update("none");
-    }
-
-    // ------------------------------------------------------------
-    // Dashboard
-    // ------------------------------------------------------------
+    /* ---------------- DASHBOARD ---------------- */
 
     async function updateDashboard() {
-        if (isDashboardUpdating) return;
-
-        isDashboardUpdating = true;
 
         try {
-            const [statusData, metricsData] = await Promise.all([
-                apiFetch("/api/status"),
-                apiFetch("/api/metrics")
-            ]);
 
-            const beacon = $("status-beacon");
-            const statusTitle = $("status-title");
-            const statusSubtitle = $("status-subtitle");
+            const [
+                statusRes,
+                metricsRes
+            ] = await Promise.all(
+                [
+                    fetch(
+                        "/api/status",
+                        {
+                            cache:
+                                "no-store"
+                        }
+                    ),
 
-            const isOnline = statusData.status === "ONLINE";
+                    fetch(
+                        "/api/metrics",
+                        {
+                            cache:
+                                "no-store"
+                        }
+                    )
+                ]
+            );
 
-            if (beacon) {
-                beacon.className = `beacon ${isOnline ? "online" : "offline"}`;
+
+            if (
+                !statusRes.ok ||
+                !metricsRes.ok
+            ) {
+                throw new Error(
+                    "Server response failed"
+                );
             }
 
-            setText(
-                "status-title",
-                isOnline ? "Online" : "Connection unavailable"
+
+            const status =
+                await statusRes.json();
+
+            const metrics =
+                await metricsRes.json();
+
+
+            const online =
+                status.status ===
+                "ONLINE";
+
+
+            $("status-beacon").className =
+                `status-dot ${
+                    online
+                        ? "online"
+                        : "offline"
+                }`;
+
+
+            $("side-dot").style.background =
+                online
+                    ? "var(--green)"
+                    : "var(--red)";
+
+
+            $("status-title").textContent =
+                online
+                    ? "Your internet is working"
+                    : "Internet connection is down";
+
+
+            $("status-subtitle").textContent =
+                online
+                    ? "Everything looks normal right now"
+                    : "The monitor cannot reach the network";
+
+
+            $("health-score-val").textContent =
+                status.health_score ??
+                "--";
+
+
+            $("health-ring").style.setProperty(
+                "--health",
+                `${
+                    (Number(
+                        status.health_score
+                    ) || 0)
+                    * 3.6
+                }deg`
             );
 
-            setText(
-                "status-subtitle",
-                isOnline
-                    ? "Your internet connection is operating normally."
-                    : "Network probes are currently failing."
-            );
 
-            setText("health-score-val", statusData.health_score);
-            setText(
-                "session-uptime-text",
-                formatSessionUptime(statusData.session_duration_seconds)
-            );
-
-            setText(
-                "card-reliability-val",
-                `${formatNumber(statusData.reliability_today)}%`
-            );
-
-            // Ping
-            const pingElement = $("card-ping-val");
-            const pingBadge = $("card-ping-badge");
-
-            if (statusData.latency !== null) {
-                setText(
-                    "card-ping-val",
-                    `${formatNumber(statusData.latency)} ms`
+            $("session-uptime-text").textContent =
+                formatUptime(
+                    status.session_duration_seconds
                 );
 
-                if (statusData.latency < 40) {
-                    pingBadge.textContent = "Excellent";
-                    pingBadge.className = "badge excellent";
-                } else if (statusData.latency < 90) {
-                    pingBadge.textContent = "Good";
-                    pingBadge.className = "badge good";
-                } else if (statusData.latency < 180) {
-                    pingBadge.textContent = "Elevated";
-                    pingBadge.className = "badge warning";
+
+            /* Ping */
+
+            if (
+                status.latency !== null &&
+                status.latency !== undefined
+            ) {
+
+                $("card-ping-val").textContent =
+                    `${Number(
+                        status.latency
+                    ).toFixed(1)} ms`;
+
+
+                if (
+                    status.latency < 40
+                ) {
+
+                    setMetricNote(
+                        "card-ping-badge",
+                        "Excellent response",
+                        "excellent"
+                    );
+
+                } else if (
+                    status.latency < 90
+                ) {
+
+                    setMetricNote(
+                        "card-ping-badge",
+                        "Good response",
+                        "good"
+                    );
+
                 } else {
-                    pingBadge.textContent = "High";
-                    pingBadge.className = "badge critical";
+
+                    setMetricNote(
+                        "card-ping-badge",
+                        "A little slow",
+                        "warning"
+                    );
                 }
+
             } else {
-                pingElement.textContent = "Unavailable";
-                pingBadge.textContent = "Offline";
-                pingBadge.className = "badge critical";
-            }
 
-            // Packet loss
-            const packetLoss = statusData.packet_loss;
+                $("card-ping-val").textContent =
+                    "Offline";
 
-            if (packetLoss !== null) {
-                setText(
-                    "card-loss-val",
-                    `${formatNumber(packetLoss)}%`
+                setMetricNote(
+                    "card-ping-badge",
+                    "No response",
+                    "critical"
                 );
-
-                if (packetLoss === 0) {
-                    $("card-loss-badge").textContent = "None";
-                    $("card-loss-badge").className = "badge excellent";
-                } else if (packetLoss <= 1) {
-                    $("card-loss-badge").textContent = "Low";
-                    $("card-loss-badge").className = "badge good";
-                } else if (packetLoss <= 5) {
-                    $("card-loss-badge").textContent = "Warning";
-                    $("card-loss-badge").className = "badge warning";
-                } else {
-                    $("card-loss-badge").textContent = "High";
-                    $("card-loss-badge").className = "badge critical";
-                }
-            } else {
-                setText("card-loss-val", "--");
-                $("card-loss-badge").textContent = "--";
-                $("card-loss-badge").className = "badge";
             }
 
-            // DNS
-            const dnsTime = statusData.dns_time;
 
-            if (dnsTime !== null) {
-                setText(
-                    "card-dns-val",
-                    `${formatNumber(dnsTime)} ms`
+            /* Packet loss */
+
+            if (
+                status.packet_loss !== null &&
+                status.packet_loss !== undefined
+            ) {
+
+                $("card-loss-val").textContent =
+                    `${Number(
+                        status.packet_loss
+                    ).toFixed(1)}%`;
+
+
+                if (
+                    status.packet_loss === 0
+                ) {
+
+                    setMetricNote(
+                        "card-loss-badge",
+                        "No loss detected",
+                        "excellent"
+                    );
+
+                } else if (
+                    status.packet_loss <= 5
+                ) {
+
+                    setMetricNote(
+                        "card-loss-badge",
+                        "Some packets lost",
+                        "warning"
+                    );
+
+                } else {
+
+                    setMetricNote(
+                        "card-loss-badge",
+                        "High packet loss",
+                        "critical"
+                    );
+                }
+            }
+
+
+            /* DNS */
+
+            if (
+                status.dns_time !== null &&
+                status.dns_time !== undefined
+            ) {
+
+                $("card-dns-val").textContent =
+                    `${Number(
+                        status.dns_time
+                    ).toFixed(1)} ms`;
+
+
+                if (
+                    status.dns_time < 50
+                ) {
+
+                    setMetricNote(
+                        "card-dns-badge",
+                        "Fast lookup",
+                        "excellent"
+                    );
+
+                } else if (
+                    status.dns_time < 100
+                ) {
+
+                    setMetricNote(
+                        "card-dns-badge",
+                        "Normal lookup",
+                        "good"
+                    );
+
+                } else {
+
+                    setMetricNote(
+                        "card-dns-badge",
+                        "Slow lookup",
+                        "warning"
+                    );
+                }
+
+            } else {
+
+                $("card-dns-val").textContent =
+                    "Failed";
+
+                setMetricNote(
+                    "card-dns-badge",
+                    "DNS did not respond",
+                    "critical"
                 );
-
-                if (dnsTime < 50) {
-                    $("card-dns-badge").textContent = "Fast";
-                    $("card-dns-badge").className = "badge excellent";
-                } else if (dnsTime < 100) {
-                    $("card-dns-badge").textContent = "Good";
-                    $("card-dns-badge").className = "badge good";
-                } else if (dnsTime < 200) {
-                    $("card-dns-badge").textContent = "Slow";
-                    $("card-dns-badge").className = "badge warning";
-                } else {
-                    $("card-dns-badge").textContent = "Very slow";
-                    $("card-dns-badge").className = "badge critical";
-                }
-            } else {
-                setText("card-dns-val", "Failed");
-                $("card-dns-badge").textContent = "Failed";
-                $("card-dns-badge").className = "badge critical";
             }
 
-            updateChart(metricsData);
+
+            $("card-reliability-val").textContent =
+                `${Number(
+                    status.reliability_today || 0
+                ).toFixed(1)}%`;
+
+
+            /* Chart */
+
+            if (latencyChart) {
+
+                latencyChart.data.labels =
+                    metrics.map(
+                        m =>
+                            formatTime(
+                                m.timestamp
+                            )
+                    );
+
+
+                latencyChart.data.datasets[0].data =
+                    metrics.map(
+                        m =>
+                            m.latency
+                    );
+
+
+                latencyChart.data.datasets[1].data =
+                    metrics.map(
+                        m =>
+                            m.dns_time
+                    );
+
+
+                latencyChart.update(
+                    "none"
+                );
+            }
+
         } catch (error) {
-            console.error("Dashboard update failed:", error);
 
-            const beacon = $("status-beacon");
-
-            if (beacon) {
-                beacon.className = "beacon offline";
-            }
-
-            setText("status-title", "Monitor unavailable");
-            setText(
-                "status-subtitle",
-                "Unable to communicate with the local monitoring service."
+            console.error(
+                "Dashboard update failed:",
+                error
             );
-        } finally {
-            isDashboardUpdating = false;
         }
     }
 
-    // ------------------------------------------------------------
-    // Statistics
-    // ------------------------------------------------------------
 
-    const tabBtns = document.querySelectorAll(".btn-tab");
+    /* ---------------- STATISTICS ---------------- */
 
-    tabBtns.forEach((button) => {
-        button.addEventListener("click", () => {
-            tabBtns.forEach((btn) => btn.classList.remove("active"));
+    document
+        .querySelectorAll(".btn-tab")
+        .forEach(
+            (btn) => {
 
-            button.classList.add("active");
+                btn.addEventListener(
+                    "click",
+                    () => {
 
-            selectedStatsDays = Number(button.dataset.days) || 1;
+                        document
+                            .querySelectorAll(
+                                ".btn-tab"
+                            )
+                            .forEach(
+                                b =>
+                                    b.classList.remove(
+                                        "active"
+                                    )
+                            );
 
-            fetchStatistics(selectedStatsDays);
-        });
-    });
+                        btn.classList.add(
+                            "active"
+                        );
 
-    async function fetchStatistics(days) {
+                        selectedStatsDays =
+                            Number(
+                                btn.dataset.days
+                            );
+
+                        fetchStatistics(
+                            selectedStatsDays
+                        );
+                    }
+                );
+            }
+        );
+
+
+    async function fetchStatistics(
+        days
+    ) {
+
         try {
-            const data = await apiFetch(`/api/statistics?days=${days}`);
 
-            setText("stats-uptime", `${formatNumber(data.uptime_percentage)}%`);
-            setText("stats-outages-count", data.outage_count);
-            setText(
-                "stats-downtime",
-                formatDuration(data.total_downtime_sec)
-            );
-            setText(
-                "stats-longest-outage",
-                formatDuration(data.longest_outage_sec)
-            );
+            const res =
+                await fetch(
+                    `/api/statistics?days=${days}`,
+                    {
+                        cache:
+                            "no-store"
+                    }
+                );
 
-            setText(
-                "stats-avg-ping",
-                `${formatNumber(data.avg_latency)} ms`
-            );
 
-            setText(
-                "stats-min-max-ping",
-                `${formatNumber(data.min_latency)} / ${formatNumber(data.max_latency)} ms`
-            );
+            const data =
+                await res.json();
 
-            setText(
-                "stats-avg-loss",
-                `${formatNumber(data.avg_packet_loss)}%`
-            );
 
-            setText(
-                "stats-avg-dns",
-                `${formatNumber(data.avg_dns_time)} ms`
-            );
+            $("stats-uptime").textContent =
+                `${data.uptime_percentage}%`;
+
+
+            $("stats-outages-count").textContent =
+                data.outage_count;
+
+
+            $("stats-downtime").textContent =
+                formatDuration(
+                    data.total_downtime_sec
+                );
+
+
+            $("stats-longest-outage").textContent =
+                formatDuration(
+                    data.longest_outage_sec
+                );
+
+
+            $("stats-avg-ping").textContent =
+                `${data.avg_latency} ms`;
+
+
+            $("stats-min-max-ping").textContent =
+                `${data.min_latency} / ${data.max_latency} ms`;
+
+
+            $("stats-avg-loss").textContent =
+                `${data.avg_packet_loss}%`;
+
+
+            $("stats-avg-dns").textContent =
+                `${data.avg_dns_time} ms`;
+
         } catch (error) {
-            console.error("Statistics error:", error);
+
+            console.error(
+                "Statistics failed:",
+                error
+            );
         }
     }
 
-    // ------------------------------------------------------------
-    // Outages
-    // ------------------------------------------------------------
+
+    /* ---------------- OUTAGES ---------------- */
 
     async function fetchOutages() {
-        const container = $("outages-timeline-list");
-
-        if (!container) return;
 
         try {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="loading-spinner"></div>
-                    <p>Loading outage history...</p>
-                </div>
-            `;
 
-            const outages = await apiFetch("/api/outages");
+            const res =
+                await fetch(
+                    "/api/outages",
+                    {
+                        cache:
+                            "no-store"
+                    }
+                );
 
-            if (!Array.isArray(outages) || outages.length === 0) {
-                container.innerHTML = `
+
+            const outages =
+                await res.json();
+
+
+            const container =
+                $("outages-timeline-list");
+
+
+            if (!outages.length) {
+
+                container.innerHTML =
+                    `
                     <div class="empty-state">
-                        <div class="empty-icon">✓</div>
-                        <h4>No outages recorded</h4>
-                        <p>Your monitor has not detected any connection outages.</p>
+                        No outages recorded.
+                        Your connection has been clean.
                     </div>
-                `;
+                    `;
+
                 return;
             }
 
-            container.innerHTML = outages.map((outage) => {
-                const resolved = outage.status === "RESOLVED";
 
-                return `
-                    <div class="timeline-item ${resolved ? "resolved" : "ongoing"}">
-                        <div class="timeline-marker"></div>
+            container.innerHTML =
+                outages.map(
+                    o =>
+                        `
+                        <div class="timeline-item ${
+                            o.status === "RESOLVED"
+                                ? "resolved"
+                                : ""
+                        }">
 
-                        <div class="timeline-content">
-                            <div class="timeline-top">
-                                <span class="timeline-status ${resolved ? "resolved" : "ongoing"}">
-                                    ${resolved ? "Resolved" : "Ongoing"}
-                                </span>
+                            <span class="timeline-dot"></span>
 
-                                <span class="timeline-duration">
-                                    ${escapeHtml(formatDuration(outage.duration_seconds))}
-                                </span>
+                            <div class="timeline-main">
+
+                                <b>
+                                    ${
+                                        o.status === "RESOLVED"
+                                            ? "Connection recovered"
+                                            : "Connection is still down"
+                                    }
+                                </b>
+
+                                <p>
+                                    ${formatTime(
+                                        o.start_time
+                                    )}
+
+                                    ${
+                                        o.end_time
+                                            ? `→ ${formatTime(
+                                                o.end_time
+                                            )}`
+                                            : "→ ongoing"
+                                    }
+                                </p>
+
                             </div>
 
-                            <div class="timeline-time">
-                                ${escapeHtml(formatDateTime(outage.start_time))}
-                                ${outage.end_time
-                                    ? ` → ${escapeHtml(formatDateTime(outage.end_time))}`
-                                    : ""
-                                }
-                            </div>
+                            <span class="timeline-duration">
+                                ${formatDuration(
+                                    o.duration_seconds
+                                )}
+                            </span>
+
                         </div>
-                    </div>
-                `;
-            }).join("");
+                        `
+                ).join("");
+
         } catch (error) {
-            console.error("Outage error:", error);
 
-            container.innerHTML = `
-                <div class="empty-state error-state">
-                    <div class="empty-icon">!</div>
-                    <h4>Unable to load outages</h4>
-                    <p>${escapeHtml(error.message)}</p>
-                </div>
-            `;
+            console.error(
+                "Outages failed:",
+                error
+            );
         }
     }
 
-    // ------------------------------------------------------------
-    // Speed test
-    // ------------------------------------------------------------
 
-    const speedTestButton = $("btn-start-speedtest");
+    /* ---------------- SPEED TEST ---------------- */
 
-    if (speedTestButton) {
-        speedTestButton.addEventListener("click", async () => {
-            speedTestButton.disabled = true;
-            speedTestButton.textContent = "Testing…";
+    function setSpeedProgress(
+        value,
+        label = null
+    ) {
 
-            setText("speed-val", "—");
-            setText("speed-duration", "Running");
-            setText("speed-bytes", "Downloading…");
-            setText("speed-time", "Now");
+        const pct =
+            Math.max(
+                0,
+                Math.min(
+                    100,
+                    value
+                )
+            );
 
-            try {
-                const data = await apiFetch("/api/speedtest", {
-                    method: "POST"
-                });
 
-                if (data.status !== "success") {
-                    throw new Error(data.message || "Speed test failed.");
+        $("speed-progress-fill")
+            .style.width =
+                `${pct}%`;
+
+
+        $("speedometer")
+            .style.setProperty(
+                "--progress",
+                `${pct * 3.6}deg`
+            );
+
+
+        $("speed-progress-text")
+            .textContent =
+                `${Math.round(
+                    pct
+                )}%`;
+
+
+        $("speed-percent")
+            .textContent =
+                label ??
+                `${Math.round(
+                    pct
+                )}%`;
+    }
+
+
+    $("btn-start-speedtest")
+        .addEventListener(
+            "click",
+            async () => {
+
+                const button =
+                    $("btn-start-speedtest");
+
+
+                button.disabled =
+                    true;
+
+
+                button.innerHTML =
+                    "<span>◌</span> Testing…";
+
+
+                $("speed-state")
+                    .textContent =
+                        "Measuring download speed…";
+
+
+                $("speed-live-time")
+                    .textContent =
+                        "Please wait";
+
+
+                $("speed-error")
+                    .classList.remove(
+                        "show"
+                    );
+
+
+                $("speed-ping")
+                    .textContent =
+                        "Testing";
+
+
+                $("speed-bytes")
+                    .textContent =
+                        "Receiving";
+
+
+                $("speed-duration")
+                    .textContent =
+                        "Running";
+
+
+                $("speed-val")
+                    .textContent =
+                        "—";
+
+
+                setSpeedProgress(
+                    2,
+                    "Connecting"
+                );
+
+
+                const started =
+                    performance.now();
+
+
+                let progress = 2;
+
+
+                speedProgressTimer =
+                    setInterval(
+                        () => {
+
+                            const elapsed =
+                                (
+                                    performance.now()
+                                    -
+                                    started
+                                )
+                                /
+                                1000;
+
+
+                            progress =
+                                Math.min(
+                                    94,
+                                    2 +
+                                    92 *
+                                    (
+                                        1 -
+                                        Math.exp(
+                                            -elapsed / 4
+                                        )
+                                    )
+                                );
+
+
+                            setSpeedProgress(
+                                progress,
+                                "Measuring"
+                            );
+
+
+                            $("speed-live-time")
+                                .textContent =
+                                    `${elapsed.toFixed(
+                                        1
+                                    )}s elapsed`;
+
+                        },
+                        120
+                    );
+
+
+                try {
+
+                    const res =
+                        await fetch(
+                            "/api/speedtest",
+                            {
+                                method:
+                                    "POST",
+
+                                cache:
+                                    "no-store"
+                            }
+                        );
+
+
+                    const data =
+                        await res.json();
+
+
+                    if (
+                        !res.ok ||
+                        data.status !==
+                            "success"
+                    ) {
+
+                        throw new Error(
+                            data.message ||
+                            "Speed test failed."
+                        );
+                    }
+
+
+                    clearInterval(
+                        speedProgressTimer
+                    );
+
+
+                    setSpeedProgress(
+                        100,
+                        "Complete"
+                    );
+
+
+                    $("speed-state")
+                        .textContent =
+                            "Test complete";
+
+
+                    $("speed-live-time")
+                        .textContent =
+                            "Finished";
+
+
+                    $("speed-val")
+                        .textContent =
+                            Number(
+                                data.download_speed_mbps
+                            ).toFixed(2);
+
+
+                    $("speed-ping")
+                        .textContent =
+                            data.latency_ms ==
+                            null
+
+                                ? "--"
+
+                                : Number(
+                                    data.latency_ms
+                                ).toFixed(1);
+
+
+                    $("speed-bytes")
+                        .textContent =
+                            `${
+                                (
+                                    Number(
+                                        data.bytes_received
+                                    )
+                                    /
+                                    1024
+                                    /
+                                    1024
+                                ).toFixed(1)
+                            } MB`;
+
+
+                    $("speed-duration")
+                        .textContent =
+                            `${
+                                Number(
+                                    data.duration_seconds
+                                ).toFixed(1)
+                            }s`;
+
+                } catch (error) {
+
+                    clearInterval(
+                        speedProgressTimer
+                    );
+
+
+                    setSpeedProgress(
+                        0,
+                        "Failed"
+                    );
+
+
+                    $("speed-state")
+                        .textContent =
+                            "Test failed";
+
+
+                    $("speed-live-time")
+                        .textContent =
+                            "Try again";
+
+
+                    $("speed-val")
+                        .textContent =
+                            "0.00";
+
+
+                    $("speed-ping")
+                        .textContent =
+                            "--";
+
+
+                    $("speed-bytes")
+                        .textContent =
+                            "--";
+
+
+                    $("speed-duration")
+                        .textContent =
+                            "--";
+
+
+                    $("speed-error")
+                        .textContent =
+                            error.message;
+
+
+                    $("speed-error")
+                        .classList.add(
+                            "show"
+                        );
+
+                } finally {
+
+                    button.disabled =
+                        false;
+
+
+                    button.innerHTML =
+                        "<span>↯</span> Run speed test again";
                 }
-
-                setText(
-                    "speed-val",
-                    Number(data.download_speed_mbps).toFixed(2)
-                );
-
-                setText(
-                    "speed-duration",
-                    `${data.duration_seconds}s`
-                );
-
-                setText(
-                    "speed-bytes",
-                    formatBytes(data.bytes_received)
-                );
-
-                setText(
-                    "speed-time",
-                    formatDateTime(data.timestamp)
-                );
-            } catch (error) {
-                console.error("Speed test error:", error);
-
-                setText("speed-val", "—");
-                setText("speed-duration", "Failed");
-                setText("speed-bytes", "—");
-                setText("speed-time", "—");
-
-                showToast(error.message, "error");
-            } finally {
-                speedTestButton.disabled = false;
-                speedTestButton.textContent = "Run speed test";
             }
-        });
-    }
+        );
 
-    function formatBytes(bytes) {
-        bytes = Number(bytes) || 0;
 
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1024 * 1024) {
-            return `${(bytes / 1024).toFixed(1)} KB`;
-        }
-
-        if (bytes < 1024 * 1024 * 1024) {
-            return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-        }
-
-        return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-    }
-
-    // ------------------------------------------------------------
-    // Settings
-    // ------------------------------------------------------------
+    /* ---------------- SETTINGS ---------------- */
 
     async function loadSettings() {
+
         try {
-            const data = await apiFetch("/api/settings");
 
-            $("setting-interval").value = data.interval;
-            $("setting-ping-target").value = data.ping_target;
-            $("setting-dns-target").value = data.dns_target;
-            $("setting-retention").value = data.retention_days;
-            $("setting-graph-points").value = data.max_graph_points;
+            const res =
+                await fetch(
+                    "/api/settings",
+                    {
+                        cache:
+                            "no-store"
+                    }
+                );
+
+
+            const data =
+                await res.json();
+
+
+            $("setting-interval").value =
+                data.interval;
+
+
+            $("setting-ping-target").value =
+                data.ping_target;
+
+
+            $("setting-dns-target").value =
+                data.dns_target;
+
+
+            $("setting-dns-domain").value =
+                data.dns_probe_domain ||
+                "example.com";
+
+
+            $("setting-retention").value =
+                data.retention_days;
+
+
+            $("setting-graph-points").value =
+                data.max_graph_points;
+
         } catch (error) {
-            console.error("Settings loading error:", error);
+
+            console.error(
+                "Settings failed:",
+                error
+            );
         }
     }
 
-    const settingsForm = $("settings-form");
 
-    if (settingsForm) {
-        settingsForm.addEventListener("submit", async (event) => {
-            event.preventDefault();
+    $("settings-form")
+        .addEventListener(
+            "submit",
+            async (event) => {
 
-            const button = settingsForm.querySelector("button[type='submit']");
-            const status = $("settings-save-status");
+                event.preventDefault();
 
-            const payload = {
-                interval: $("setting-interval").value,
-                ping_target: $("setting-ping-target").value.trim(),
-                dns_target: $("setting-dns-target").value.trim(),
-                retention_days: $("setting-retention").value,
-                max_graph_points: $("setting-graph-points").value
-            };
 
-            button.disabled = true;
-            button.textContent = "Saving…";
+                const status =
+                    $("settings-save-status");
 
-            try {
-                await apiFetch("/api/settings", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify(payload)
-                });
 
-                status.textContent = "Settings saved";
-                status.className = "status-msg success";
+                status.textContent =
+                    "";
 
-                setTimeout(() => {
-                    status.textContent = "";
-                }, 3000);
 
-                updateDashboard();
-            } catch (error) {
-                console.error("Settings save error:", error);
+                const payload = {
 
-                status.textContent = error.message;
-                status.className = "status-msg error";
-            } finally {
-                button.disabled = false;
-                button.textContent = "Save settings";
+                    interval:
+                        $("setting-interval")
+                            .value,
+
+                    ping_target:
+                        $("setting-ping-target")
+                            .value
+                            .trim(),
+
+                    dns_target:
+                        $("setting-dns-target")
+                            .value
+                            .trim(),
+
+                    dns_probe_domain:
+                        $("setting-dns-domain")
+                            .value
+                            .trim(),
+
+                    retention_days:
+                        $("setting-retention")
+                            .value,
+
+                    max_graph_points:
+                        $("setting-graph-points")
+                            .value
+                };
+
+
+                try {
+
+                    const res =
+                        await fetch(
+                            "/api/settings",
+                            {
+                                method:
+                                    "POST",
+
+                                headers:
+                                    {
+                                        "Content-Type":
+                                            "application/json"
+                                    },
+
+                                body:
+                                    JSON.stringify(
+                                        payload
+                                    )
+                            }
+                        );
+
+
+                    const data =
+                        await res.json();
+
+
+                    if (!res.ok) {
+
+                        throw new Error(
+                            (
+                                data.errors ||
+                                [
+                                    "Could not save settings."
+                                ]
+                            ).join(" ")
+                        );
+                    }
+
+
+                    status.textContent =
+                        "Saved.";
+
+
+                    setTimeout(
+                        () => {
+                            status.textContent =
+                                "";
+                        },
+                        2500
+                    );
+
+                } catch (error) {
+
+                    status.textContent =
+                        error.message;
+
+                    status.style.color =
+                        "var(--red)";
+                }
+
             }
-        });
-    }
+        );
 
-    // ------------------------------------------------------------
-    // Toast
-    // ------------------------------------------------------------
 
-    function showToast(message, type = "info") {
-        let toast = $("app-toast");
-
-        if (!toast) {
-            toast = document.createElement("div");
-            toast.id = "app-toast";
-            document.body.appendChild(toast);
-        }
-
-        toast.className = `toast ${type}`;
-        toast.textContent = message;
-
-        requestAnimationFrame(() => {
-            toast.classList.add("visible");
-        });
-
-        setTimeout(() => {
-            toast.classList.remove("visible");
-        }, 3500);
-    }
-
-    // ------------------------------------------------------------
-    // Init
-    // ------------------------------------------------------------
+    /* ---------------- START ---------------- */
 
     initChart();
+
     updateDashboard();
 
-    dashboardTimer = setInterval(updateDashboard, 3000);
+    setInterval(
+        updateDashboard,
+        3000
+    );
 
-    window.addEventListener("beforeunload", () => {
-        if (dashboardTimer) {
-            clearInterval(dashboardTimer);
-        }
-    });
 });
