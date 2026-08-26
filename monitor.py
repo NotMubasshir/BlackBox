@@ -1,10 +1,13 @@
 import platform
 import re
 import socket
-import subprocess
+import struct
 import threading
 import time
+
 from datetime import datetime, timezone
+
+import subprocess
 
 import database
 
@@ -12,59 +15,39 @@ import database
 class NetworkMonitor(threading.Thread):
 
     def __init__(self):
+
         super().__init__(
-            name="NetworkMonitor",
             daemon=True
         )
 
         self.running = True
+
         self.current_outage_id = None
 
-        self.recent_ping_results = []
+        self.recent_checks = []
 
         self.window_size = 10
 
-        self.session_start = datetime.now(timezone.utc)
-
-    # ------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------
+        self.session_start = (
+            datetime.now(
+                timezone.utc
+            )
+        )
 
     def stop(self):
+
         self.running = False
 
-    # ------------------------------------------------------------
-    # DNS
-    # ------------------------------------------------------------
+    def measure_ping(
+        self,
+        target
+    ):
 
-    def measure_dns(self, target_host):
-        start = time.perf_counter()
-
-        try:
-            socket.getaddrinfo(
-                target_host,
-                None,
-                type=socket.SOCK_STREAM
-            )
-
-            elapsed = (
-                time.perf_counter() - start
-            ) * 1000.0
-
-            return round(elapsed, 2)
-
-        except Exception:
-            return None
-
-    # ------------------------------------------------------------
-    # Ping
-    # ------------------------------------------------------------
-
-    def measure_ping(self, target):
         system = platform.system().lower()
 
         if system == "windows":
-            command = [
+
+            cmd = [
                 "ping",
                 "-n",
                 "1",
@@ -72,8 +55,10 @@ class NetworkMonitor(threading.Thread):
                 "1000",
                 target
             ]
+
         else:
-            command = [
+
+            cmd = [
                 "ping",
                 "-c",
                 "1",
@@ -85,77 +70,243 @@ class NetworkMonitor(threading.Thread):
         start = time.perf_counter()
 
         try:
-            result = subprocess.run(
-                command,
-                stdout=subprocess.PIPE,
+
+            output = subprocess.check_output(
+                cmd,
                 stderr=subprocess.STDOUT,
                 text=True,
-                timeout=3
+                timeout=2.5,
+                errors="ignore",
             )
 
-            if result.returncode != 0:
-                return None
+            text = output.lower()
 
-            output = result.stdout
-
-            # Handles examples such as:
-            #
-            # time=14ms
-            # time=14.3 ms
-            # time<1ms
-            #
             match = re.search(
-                r"time[=<]\s*(\d+(?:\.\d+)?)\s*ms",
-                output,
-                re.IGNORECASE
+                r"time[=<]\s*"
+                r"([0-9]+(?:\.[0-9]+)?)"
+                r"\s*ms",
+                text
             )
 
             if match:
+
                 return round(
-                    float(match.group(1)),
+                    float(
+                        match.group(1)
+                    ),
                     2
                 )
 
-            # Fallback if the OS output format differs.
-            elapsed = (
-                time.perf_counter() - start
-            ) * 1000.0
+            match = re.search(
+                r"average[ =]+"
+                r"([0-9]+(?:\.[0-9]+)?)"
+                r"\s*ms",
+                text
+            )
 
-            return round(elapsed, 2)
+            if match:
 
-        except (
-            subprocess.TimeoutExpired,
-            subprocess.SubprocessError,
-            OSError
-        ):
+                return round(
+                    float(
+                        match.group(1)
+                    ),
+                    2
+                )
+
+            return round(
+                (
+                    time.perf_counter()
+                    -
+                    start
+                ) * 1000,
+                2
+            )
+
+        except Exception:
+
+            return self.tcp_ping_fallback(
+                target
+            )
+
+    def tcp_ping_fallback(
+        self,
+        target,
+        port=443
+    ):
+
+        start = time.perf_counter()
+
+        sock = socket.socket(
+            socket.AF_INET,
+            socket.SOCK_STREAM
+        )
+
+        sock.settimeout(1.5)
+
+        try:
+
+            sock.connect(
+                (
+                    target,
+                    port
+                )
+            )
+
+            return round(
+                (
+                    time.perf_counter()
+                    -
+                    start
+                ) * 1000,
+                2
+            )
+
+        except Exception:
+
             return None
 
-    # ------------------------------------------------------------
-    # TCP fallback
-    # ------------------------------------------------------------
+        finally:
 
-    def tcp_ping_fallback(self, target, port=80):
+            sock.close()
+
+    def measure_dns(
+        self,
+        dns_server,
+        domain
+    ):
+
+        """
+        Perform an actual DNS A-record query
+        against the selected DNS server.
+        """
+
+        try:
+
+            server = socket.gethostbyname(
+                dns_server
+            )
+
+        except OSError:
+
+            return None
+
+        transaction_id = (
+            int(
+                time.time() * 1000
+            )
+            &
+            0xFFFF
+        )
+
+        header = struct.pack(
+            "!HHHHHH",
+            transaction_id,
+            0x0100,
+            1,
+            0,
+            0,
+            0
+        )
+
+        question = b""
+
+        for label in domain.rstrip(".").split("."):
+
+            encoded = label.encode(
+                "idna"
+            )
+
+            if len(encoded) > 63:
+                return None
+
+            question += (
+                bytes(
+                    [len(encoded)]
+                )
+                +
+                encoded
+            )
+
+        question += (
+            b"\x00"
+            +
+            struct.pack(
+                "!HH",
+                1,
+                1
+            )
+        )
+
+        packet = (
+            header
+            +
+            question
+        )
+
+        sock = socket.socket(
+            socket.AF_INET,
+            socket.SOCK_DGRAM
+        )
+
+        sock.settimeout(2.0)
+
         start = time.perf_counter()
 
         try:
-            with socket.create_connection(
-                (target, port),
-                timeout=1.5
+
+            sock.sendto(
+                packet,
+                (
+                    server,
+                    53
+                )
+            )
+
+            response, _ = sock.recvfrom(
+                2048
+            )
+
+            if len(response) < 12:
+                return None
+
+            returned_id = struct.unpack(
+                "!H",
+                response[:2]
+            )[0]
+
+            flags = struct.unpack(
+                "!H",
+                response[2:4]
+            )[0]
+
+            answers = struct.unpack(
+                "!H",
+                response[6:8]
+            )[0]
+
+            if (
+                returned_id != transaction_id
+                or not (flags & 0x8000)
+                or answers == 0
             ):
-                pass
+                return None
 
-            elapsed = (
-                time.perf_counter() - start
-            ) * 1000.0
-
-            return round(elapsed, 2)
+            return round(
+                (
+                    time.perf_counter()
+                    -
+                    start
+                ) * 1000,
+                2
+            )
 
         except Exception:
+
             return None
 
-    # ------------------------------------------------------------
-    # Health score
-    # ------------------------------------------------------------
+        finally:
+
+            sock.close()
 
     def calculate_health_score(
         self,
@@ -164,6 +315,7 @@ class NetworkMonitor(threading.Thread):
         dns_time,
         is_online
     ):
+
         if not is_online:
             return 0
 
@@ -186,16 +338,17 @@ class NetworkMonitor(threading.Thread):
         elif packet_loss > 1:
             score -= 20
 
-        if dns_time is not None:
+        if dns_time is None:
 
-            if dns_time > 150:
-                score -= 20
-
-            elif dns_time > 75:
-                score -= 10
-
-        else:
             score -= 15
+
+        elif dns_time > 150:
+
+            score -= 20
+
+        elif dns_time > 75:
+
+            score -= 10
 
         return max(
             0,
@@ -205,194 +358,143 @@ class NetworkMonitor(threading.Thread):
             )
         )
 
-    # ------------------------------------------------------------
-    # Packet loss
-    # ------------------------------------------------------------
-
-    def calculate_packet_loss(self, ping_success):
-        self.recent_ping_results.append(
-            1 if ping_success else 0
-        )
-
-        if len(self.recent_ping_results) > self.window_size:
-            self.recent_ping_results.pop(0)
-
-        total = len(self.recent_ping_results)
-
-        if total == 0:
-            return 0.0
-
-        failed = self.recent_ping_results.count(0)
-
-        return round(
-            (failed / total) * 100,
-            2
-        )
-
-    # ------------------------------------------------------------
-    # Main monitor loop
-    # ------------------------------------------------------------
-
     def run(self):
+
         database.init_db()
 
         cleanup_counter = 0
 
         while self.running:
 
-            try:
-                settings = database.get_settings()
+            settings = database.get_settings()
 
-                interval = float(
-                    settings.get(
-                        "interval",
-                        5
-                    )
-                )
-
-                interval = max(
-                    1,
-                    min(
-                        interval,
-                        60
-                    )
-                )
-
-                ping_target = settings.get(
-                    "ping_target",
-                    "8.8.8.8"
-                )
-
-                dns_target = settings.get(
-                    "dns_target",
-                    "one.one.one.one"
-                )
-
-                retention_days = int(
-                    settings.get(
-                        "retention_days",
-                        7
-                    )
-                )
-
-                # ------------------------------------------------
-                # Network probes
-                # ------------------------------------------------
-
-                ping_time = self.measure_ping(
-                    ping_target
-                )
-
-                # If normal ping fails, try TCP as a secondary
-                # connectivity signal.
-                tcp_time = None
-
-                if ping_time is None:
-                    tcp_time = self.tcp_ping_fallback(
-                        ping_target
-                    )
-
-                dns_time = self.measure_dns(
-                    dns_target
-                )
-
-                ping_success = (
-                    ping_time is not None
-                )
-
-                # Connectivity is considered available when
-                # either the configured ping target or DNS works.
-                is_online = (
-                    ping_success
-                    or tcp_time is not None
-                    or dns_time is not None
-                )
-
-                packet_loss = (
-                    self.calculate_packet_loss(
-                        ping_success
-                    )
-                )
-
-                # Prefer real ICMP latency.
-                latency = ping_time
-
-                if latency is None and tcp_time is not None:
-                    latency = tcp_time
-
-                status = (
-                    "ONLINE"
-                    if is_online
-                    else "OFFLINE"
-                )
-
-                # ------------------------------------------------
-                # Outage tracking
-                # ------------------------------------------------
-
-                if is_online:
-
-                    if self.current_outage_id is not None:
-
-                        database.resolve_outage(
-                            self.current_outage_id
+            interval = max(
+                1.0,
+                min(
+                    float(
+                        settings.get(
+                            "interval",
+                            5
                         )
-
-                        self.current_outage_id = None
-
-                else:
-
-                    if self.current_outage_id is None:
-
-                        self.current_outage_id = (
-                            database.start_outage()
-                        )
-
-                # ------------------------------------------------
-                # Store measurement
-                # ------------------------------------------------
-
-                database.insert_measurement(
-                    status=status,
-                    latency=latency,
-                    packet_loss=packet_loss,
-                    dns_time=dns_time
+                    ),
+                    60.0
                 )
+            )
 
-                # ------------------------------------------------
-                # Cleanup
-                # ------------------------------------------------
+            ping_target = settings.get(
+                "ping_target",
+                "1.1.1.1"
+            )
 
-                cleanup_counter += 1
+            dns_server = settings.get(
+                "dns_target",
+                "1.1.1.1"
+            )
 
-                if cleanup_counter >= 100:
+            dns_domain = settings.get(
+                "dns_probe_domain",
+                "example.com"
+            )
 
-                    database.cleanup_old_data(
-                        retention_days
-                    )
+            retention_days = int(
+                settings.get(
+                    "retention_days",
+                    7
+                )
+            )
 
-                    cleanup_counter = 0
+            ping_time = self.measure_ping(
+                ping_target
+            )
 
-                # ------------------------------------------------
-                # Interruptible-ish sleep
-                # ------------------------------------------------
+            dns_time = self.measure_dns(
+                dns_server,
+                dns_domain
+            )
 
-                for _ in range(
-                    max(
-                        1,
-                        int(interval * 10)
-                    )
+            # Either independent probe being successful
+            # means the connection is reachable.
+
+            is_success = (
+                ping_time is not None
+                or
+                dns_time is not None
+            )
+
+            self.recent_checks.append(
+                1 if is_success else 0
+            )
+
+            if len(
+                self.recent_checks
+            ) > self.window_size:
+
+                self.recent_checks.pop(0)
+
+            packet_loss = round(
+                (
+                    self.recent_checks.count(0)
+                    /
+                    len(self.recent_checks)
+                )
+                *
+                100,
+                2
+            )
+
+            if is_success:
+
+                status = "ONLINE"
+
+                if (
+                    self.current_outage_id
+                    is not None
                 ):
 
-                    if not self.running:
-                        break
+                    database.resolve_outage(
+                        self.current_outage_id
+                    )
 
-                    time.sleep(0.1)
+                    self.current_outage_id = None
 
-            except Exception as error:
+            else:
 
-                print(
-                    f"[NetworkMonitor] Error: {error}"
+                status = "OFFLINE"
+
+                if (
+                    self.current_outage_id
+                    is None
+                ):
+
+                    self.current_outage_id = (
+                        database.start_outage()
+                    )
+
+            database.insert_measurement(
+                status=status,
+                latency=ping_time,
+                packet_loss=packet_loss,
+                dns_time=dns_time
+            )
+
+            cleanup_counter += 1
+
+            if cleanup_counter >= 100:
+
+                database.cleanup_old_data(
+                    retention_days
                 )
 
-                time.sleep(2)
+                cleanup_counter = 0
+
+            for _ in range(
+                max(
+                    1,
+                    int(interval * 10)
+                )
+            ):
+
+                if not self.running:
+                    break
+
+                time.sleep(0.1)
